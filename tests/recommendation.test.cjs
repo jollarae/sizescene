@@ -1,0 +1,121 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { recommend } = require('../recommendation.js');
+
+const profile = { waistCm: 61, hipCm: 87, inseamCm: 72 };
+
+function motelScan() {
+  return {
+    sizes: {
+      waist: [], length: [], combined: ['W24 L30', 'W24 L32', 'W26 L32', 'W28 L30'], other: [],
+      unavailable: { waist: [], length: [], combined: ['W26 L30'], other: [] }
+    },
+    sizeGuides: [{ title: 'Size chart · inches', headers: ['SIZE', 'WAIST', 'SHORT LEG', 'REG LEG'], rows: [
+      ['XXS', '24"', '30"', '32"'], ['XS', '26"', '30"', '32"'], ['S', '28"', '30"', '32"']
+    ] }],
+    details: { fit: ['Wide leg fit'], rise: ['Low rise waistband'], model: [], materials: [], inseam: [], sizingAdvice: [] }
+  };
+}
+
+test('recommends an available W/L size from body measurements and chart evidence', () => {
+  const result = recommend(motelScan(), profile, 'as-designed');
+  assert.equal(result.status, 'recommended');
+  assert.equal(result.size, 'W24 L30');
+  assert.match(result.naturalFit, /wide leg/i);
+  assert.ok(result.reasons.some(value => /24/.test(value)));
+  assert.ok(result.notes.some(value => /inseam|length/i.test(value)));
+});
+
+test('roomier preference changes waist size relative to the product design and skips sold-out options', () => {
+  const result = recommend(motelScan(), profile, 'roomier');
+  assert.equal(result.size, 'W26 L32');
+  assert.ok(result.notes.some(value => /longer|inseam|length/i.test(value)));
+});
+
+test('closer preference explains when no smaller waist is offered', () => {
+  const result = recommend(motelScan(), profile, 'closer');
+  assert.equal(result.size, 'W24 L30');
+  assert.ok(result.notes.some(value => /no smaller|smallest/i.test(value)));
+});
+
+test('without a chart, numeric W/L labels give a tentative recommendation', () => {
+  const scan = motelScan();
+  scan.sizeGuides = [];
+  const result = recommend(scan, profile, 'as-designed');
+  assert.equal(result.status, 'tentative');
+  assert.equal(result.size, 'W24 L30');
+  assert.ok(result.notes.some(value => /chart|hip/i.test(value)));
+});
+
+test('letter-only options without a matching chart do not produce a guessed size', () => {
+  const scan = motelScan();
+  scan.sizes.combined = [];
+  scan.sizes.waist = ['XS', 'S', 'M'];
+  scan.sizeGuides = [];
+  const result = recommend(scan, profile, 'as-designed');
+  assert.equal(result.status, 'insufficient-data');
+  assert.equal(result.size, null);
+});
+
+test('numeric waist options use the matching chart row and consider hip measurements', () => {
+  const scan = {
+    sizes: { waist: ['23', '24', '25'], length: ['30', '32'], combined: [], other: [], unavailable: { waist: [], length: [], combined: [], other: [] } },
+    sizeGuides: [{ title: 'Size Guide', headers: ['Jean Size', 'Waist (in)', 'Hip (in)'], rows: [
+      ['23', '24', '33'], ['24', '25', '34'], ['25', '26', '35']
+    ] }],
+    details: { fit: ['Relaxed through the hip'], rise: [], model: [], materials: [], inseam: [], sizingAdvice: [] }
+  };
+  const result = recommend(scan, profile, 'as-designed');
+  assert.equal(result.status, 'recommended');
+  assert.equal(result.size, 'W24 L30');
+  assert.ok(result.reasons.some(value => /hip/i.test(value)));
+  assert.ok(result.notes.some(value => /combination|stock/i.test(value)));
+});
+
+test('letter options can be recommended when the chart maps labels to measurements', () => {
+  const scan = {
+    sizes: { waist: ['XS', 'S', 'M'], length: [], combined: [], other: [], unavailable: { waist: [], length: [], combined: [], other: [] } },
+    sizeGuides: [{ title: 'Body Size', headers: ['Size', 'Waist (cm)'], rows: [['XS', '61'], ['S', '66'], ['M', '71']] }],
+    details: { fit: [], rise: [], model: [], materials: [], inseam: [], sizingAdvice: [] }
+  };
+  const result = recommend(scan, profile, 'as-designed');
+  assert.equal(result.status, 'recommended');
+  assert.equal(result.size, 'XS');
+});
+
+test('Levi chart fit advice moves the default one available waist size up', () => {
+  const scan = {
+    sizes: { waist: ['23', '24', '25', '26'], length: ['30', '32'], combined: [], other: [], unavailable: { waist: [], length: [], combined: [], other: [] } },
+    sizeGuides: [{ title: "Find Your Levi's Waist", headers: ['Size', 'Your Waist (in.)', 'Your Hip (in.)', 'Your Thigh (in.)'], rows: [
+      ['23', '24.25', '33', '18.75'], ['24', '25.25', '34', '19.38'], ['25', '26.25', '35', '20'], ['26', '27.25', '36', '20.63']
+    ] }],
+    details: { fit: ['Relaxed through the hip and thigh'], rise: ['Low rise'], model: [], materials: [], inseam: [], sizingAdvice: ['This pair runs a bit small. We suggest buying one or two sizes up.'] }
+  };
+  const result = recommend(scan, profile, 'as-designed');
+  assert.equal(result.size, 'W25 L30');
+  assert.equal(result.status, 'recommended');
+  assert.ok(result.reasons.some(value => /runs.*small|size up/i.test(value)));
+});
+
+test('optional thigh measurement contributes when the chart provides thigh sizes', () => {
+  const scan = {
+    sizes: { waist: ['24', '25'], length: [], combined: [], other: [], unavailable: { waist: [], length: [], combined: [], other: [] } },
+    sizeGuides: [{ title: 'Jeans', headers: ['Size', 'Waist (in.)', 'Hip (in.)', 'Thigh (in.)'], rows: [
+      ['24', '25.25', '34', '19'], ['25', '26.25', '35', '22']
+    ] }],
+    details: { fit: [], rise: [], model: [], materials: [], inseam: [], sizingAdvice: [] }
+  };
+  const result = recommend(scan, { ...profile, thighCm: 55 }, 'as-designed');
+  assert.equal(result.size, '25');
+  assert.ok(result.reasons.some(value => /thigh/i.test(value)));
+});
+
+test('optional height checks a retailer length guide against the selected inseam', () => {
+  const scan = motelScan();
+  scan.sizeGuides.push({ title: "Find Your Levi's Length", headers: ['Height (in.)', "5'2” or shorter", "5'3”–5'7”", "5'8”–5'11”", "6' or taller"], rows: [
+    ['Full-Length Styles (in.)', '26–28', '28–31', '32–34', '34–36']
+  ] });
+  const result = recommend(scan, { ...profile, heightCm: 160 }, 'as-designed');
+  assert.equal(result.size, 'W24 L30');
+  assert.ok(result.reasons.some(value => /height/i.test(value)));
+});

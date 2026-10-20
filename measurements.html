@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Your measurements · Jeans Fit</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <div class="topline"><span class="eyebrow">JEANS FIT</span><a class="back-link" href="popup.html">← Back</a></div>
+    <h1>Your measurements</h1>
+    <p>Used only to compare you with sizing information on the product page.</p>
+  </header>
+  <main>
+    <form id="measurements-form" class="measurement-form">
+      <label for="waist">Waist (cm)</label>
+      <input id="waist" name="waistCm" type="number" min="40" max="200" step="0.1" required>
+      <p class="field-note">Measure the narrowest part of your natural waist.</p>
+      <label for="hip">Hip (cm)</label>
+      <input id="hip" name="hipCm" type="number" min="50" max="220" step="0.1" required>
+      <p class="field-note">Measure the fullest part of your hips.</p>
+      <label for="inseam">Inseam (cm)</label>
+      <input id="inseam" name="inseamCm" type="number" min="40" max="120" step="0.1" required>
+      <p class="field-note">Measure from crotch to ankle.</p>
+      <label for="height">Height (cm) <span class="optional">optional</span></label>
+      <input id="height" name="heightCm" type="number" min="100" max="230" step="0.1">
+      <p class="field-note">Used to check a retailer’s height-based length guide when available.</p>
+      <label for="thigh">Thigh (cm) <span class="optional">optional</span></label>
+      <input id="thigh" name="thighCm" type="number" min="25" max="100" step="0.1">
+      <p class="field-note">Measure around the fullest part of one thigh. Used only if the size chart lists thigh measurements.</p>
+      <button type="submit">Save measurements</button>
+      <p id="save-status" role="status" class="note"></p>
+    </form>
+  </main>
+  <script src="measurements.js"></script>
+</body>
+</html>
