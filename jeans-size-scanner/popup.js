@@ -18,6 +18,61 @@ function showMessage(message, isError = false) {
   add(results, 'p', message, isError ? 'message error' : 'message');
 }
 
+const loadingPause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+
+async function showLoading(mode, preference = fitPreference) {
+  const isFitChange = mode === 'fit';
+  const stages = isFitChange ? [
+    ['Rechecking available sizes', 'Looking at the choices on this listing.'],
+    ['Comparing your measurements', 'Checking the fit against your profile.'],
+    [`Finding your ${preference === 'closer' ? 'closer' : 'roomier'} fit`, 'Almost ready with your updated size.']
+  ] : [
+    ['Reading product sizing', 'Finding the sizes and fit details on this page.'],
+    ['Comparing your measurements', 'Checking the retailer’s guidance against your profile.'],
+    ['Preparing your recommendation', 'Putting your fit guidance together.']
+  ];
+
+  results.replaceChildren();
+  const panel = add(results, 'div', undefined, 'loading-panel');
+  panel.setAttribute('role', 'status');
+  panel.setAttribute('aria-live', 'polite');
+  panel.setAttribute('aria-atomic', 'true');
+  const visual = add(panel, 'div', undefined, 'loading-visual');
+  visual.setAttribute('aria-hidden', 'true');
+  add(visual, 'div', undefined, 'loading-jeans');
+  add(visual, 'div', undefined, 'loading-scan-line');
+  add(panel, 'p', 'FINDING YOUR FIT', 'loading-eyebrow');
+  const title = add(panel, 'h2', stages[0][0], 'loading-title');
+  const detail = add(panel, 'p', stages[0][1], 'loading-detail');
+  const progress = add(panel, 'div', undefined, 'loading-progress');
+  progress.setAttribute('aria-hidden', 'true');
+  add(progress, 'div', undefined, 'loading-progress-fill');
+
+  panel.dataset.step = '1';
+  await loadingPause(1000);
+  panel.dataset.step = '2';
+  title.textContent = stages[1][0];
+  detail.textContent = stages[1][1];
+  await loadingPause(1000);
+  panel.dataset.step = '3';
+  title.textContent = stages[2][0];
+  detail.textContent = stages[2][1];
+  await loadingPause(1000);
+}
+
+async function chooseFit(value) {
+  if (value === fitPreference) return;
+  fitPreference = value;
+  chrome.storage?.local?.set({ fitPreference });
+  scanButton.disabled = true;
+  try {
+    await showLoading('fit', value);
+    render(currentScan);
+  } finally {
+    scanButton.disabled = false;
+  }
+}
+
 function render(scan) {
   results.replaceChildren();
   if (!scan?.hasSizingInformation) {
@@ -41,8 +96,16 @@ function render(scan) {
   const recommendation = JeansRecommendation.recommend(scan, measurements, fitPreference);
   const recommendationSection = add(results, 'section', undefined, 'recommendation');
   recommendationSection.dataset.section = 'recommendation';
-  add(recommendationSection, 'h3', 'Your recommended size');
+  add(recommendationSection, 'h3', recommendation.status === 'tentative' ? 'Your size estimate' : 'Your recommended size');
   add(recommendationSection, 'div', recommendation.size || 'Not enough sizing data', 'recommended-size');
+  if (recommendation.soldOut) {
+    add(recommendationSection, 'p', 'Sold out · best fit for your measurements', 'sold-out-notice');
+    if (recommendation.availableSize) {
+      const alternative = add(recommendationSection, 'div', undefined, 'available-alternative');
+      add(alternative, 'span', 'Closest available size', 'alternative-label');
+      add(alternative, 'strong', recommendation.availableSize);
+    }
+  }
   add(recommendationSection, 'p',
     `Based on your ${measurements.waistCm} cm waist, ${measurements.hipCm} cm hip, and ${measurements.inseamCm} cm inseam.`, 'note');
   if (measurements.heightCm || measurements.thighCm) add(recommendationSection, 'p',
@@ -55,11 +118,7 @@ function render(scan) {
     const button = add(fitChoices, 'button', label, value === fitPreference ? 'fit-choice selected' : 'fit-choice');
     button.type = 'button';
     button.setAttribute('aria-pressed', String(value === fitPreference));
-    button.addEventListener('click', () => {
-      fitPreference = value;
-      chrome.storage?.local?.set({ fitPreference });
-      render(currentScan);
-    });
+    button.addEventListener('click', () => { void chooseFit(value); });
   }
   const explanation = add(recommendationSection, 'div', undefined, 'recommendation-explanation');
   for (const reason of recommendation.reasons) add(explanation, 'p', reason);
@@ -94,7 +153,9 @@ function render(scan) {
   chartSection.dataset.section = 'size-guide';
   add(chartSection, 'h3', 'Size guide · reference only');
   add(chartSection, 'p', 'Chart rows explain the brand’s sizing. Labels like XS or S are not product options unless they also appear above.', 'note');
-  if (!scan.sizeGuides.length) add(chartSection, 'p', 'No chart table found in the page. If there is a Size Guide button, open it and scan again.', 'note');
+  if (!scan.sizeGuides.length) add(chartSection, 'p', scan.sizeGuideStatus === 'image-only' ?
+    'The retailer provides a size chart as an image. This extension cannot read its measurements, so the size above is an estimate. View the chart on the product page to check waist and hip fit.' :
+    'No chart table found in the page. If there is a Size Guide button, open it and scan again.', 'note');
   for (const guide of scan.sizeGuides) {
     const wrap = add(chartSection, 'div', undefined, 'guide');
     add(wrap, 'h4', guide.title);
@@ -128,7 +189,7 @@ function render(scan) {
 
 async function scanPage() {
   scanButton.disabled = true;
-  showMessage('Scanning this page…');
+  const loading = showLoading('scan');
   try {
     if (chrome.storage?.local) {
       const saved = await chrome.storage.local.get(['measurements', 'fitPreference']);
@@ -139,8 +200,10 @@ async function scanPage() {
     if (!tab?.id) throw new Error('No active tab found.');
     const [injection] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['scanner.js'] });
     currentScan = injection?.result;
+    await loading;
     render(currentScan);
   } catch (error) {
+    await loading;
     showMessage('Could not scan this tab. Open a normal product page and try again. Chrome blocks scanning its own settings and store pages.', true);
   } finally {
     scanButton.disabled = false;

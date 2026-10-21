@@ -26,10 +26,25 @@ test('recommends an available W/L size from body measurements and chart evidence
   assert.ok(result.notes.some(value => /inseam|length/i.test(value)));
 });
 
-test('roomier preference changes waist size relative to the product design and skips sold-out options', () => {
+test('roomier preference shows the best fit even when its length is sold out', () => {
   const result = recommend(motelScan(), profile, 'roomier');
-  assert.equal(result.size, 'W26 L32');
+  assert.equal(result.size, 'W26 L30');
+  assert.equal(result.soldOut, true);
+  assert.equal(result.availableSize, 'W26 L32');
   assert.ok(result.notes.some(value => /longer|inseam|length/i.test(value)));
+});
+
+test('AGOLDE sold-out best fit remains recommended with the closest available alternative', () => {
+  const scan = {
+    sizes: { waist: ['32', '33', '34'], length: [], combined: [], other: [], unavailable: { waist: ['23', '24', '25', '26', '27', '28', '29', '30', '31'], length: [], combined: [], other: [] } },
+    sizeGuides: [], sizeGuideStatus: 'image-only',
+    details: { fit: ['Relaxed curved leg'], rise: [], sizingAdvice: ['This fit is true to size.'], inseam: ['Inseam: 27.5"'], model: [], materials: [] }
+  };
+  const result = recommend(scan, profile);
+  assert.equal(result.size, '24');
+  assert.equal(result.soldOut, true);
+  assert.equal(result.availableSize, '32');
+  assert.ok(result.notes.some(value => /estimate|chart/i.test(value)));
 });
 
 test('closer preference explains when no smaller waist is offered', () => {
@@ -118,4 +133,22 @@ test('optional height checks a retailer length guide against the selected inseam
   const result = recommend(scan, { ...profile, heightCm: 160 }, 'as-designed');
   assert.equal(result.size, 'W24 L30');
   assert.ok(result.reasons.some(value => /height/i.test(value)));
+});
+
+test('AGOLDE numeric sizes yield a qualified estimate and account for its fixed inseam', () => {
+  const scan = {
+    page: { store: 'AGOLDE' },
+    sizes: { waist: ['23', '24', '25'], length: [], combined: [], other: [], unavailable: { waist: ['34'], length: [], combined: [], other: [] } },
+    sizeGuides: [], sizeGuideStatus: 'image-only',
+    details: { fit: ['close fit through the leg'], rise: ['mid-rise waist'], sizingAdvice: ['This fit is true to size.'], inseam: ['Inseam: 29"'], model: [], materials: [] }
+  };
+  const result = recommend(scan, { ...profile, heightCm: 158, thighCm: 49 }, 'as-designed');
+  assert.equal(result.status, 'tentative');
+  assert.equal(result.size, '24');
+  assert.ok(result.notes.some(x => /image/i.test(x)));
+  assert.ok(result.notes.some(x => /29.*72|72.*29/.test(x)));
+  assert.ok(result.notes.some(x => /hip/i.test(x)));
+  assert.ok(result.notes.some(x => /thigh.*not|thigh.*cannot/i.test(x)));
+  assert.ok(result.notes.some(x => /height.*not|height.*cannot/i.test(x)));
+  assert.equal(recommend(scan, profile, 'roomier').size, '25');
 });
