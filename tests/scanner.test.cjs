@@ -77,6 +77,60 @@ test('Levi radio labels and dialog chart are scanned without leaving the guide o
   }
 });
 
+test('AGOLDE size dropdown and image-only chart are reported without losing product details', async () => {
+  const browser = await chromium.launch({ executablePath: chromePath, headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.route('**/*', route => route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: `
+      <main><h1>Romney Jean (Weightless) in Vanta</h1>
+        <div class="variant-option"><label>Size</label><select name="options[Size]">
+          <option value="23">23</option><option value="24">24</option><option value="25">25</option>
+          <option value="34">34 - Unavailable</option>
+        </select></div>
+        <span class="ks-chart-modal-link" role="button">Size Chart</span>
+        <p>The Romney Jean is designed with a mid-rise waist and a close fit through the leg. Crafted from non-stretch denim.</p>
+        <p><strong>This fit is true to size.</strong></p>
+        <details><summary>MORE DETAILS</summary><p><strong>Rise:</strong> 10 3/4"<br><strong>Inseam:</strong> 29"<br><strong>Model is 5'9" and is wearing a Size 27</strong><br><strong>Fabric:</strong> 100% Cotton</p></details>
+        <script>
+          document.querySelector('.ks-chart-modal-link').addEventListener('click', () => {
+            const dialog = document.createElement('div');
+            dialog.setAttribute('role', 'dialog');
+            dialog.className = 'kiwi-sizing-modal';
+            dialog.innerHTML = '<button class="ks-modal-close">Close</button><img class="ks-image" src="https://example.com/chart.jpg" alt="">';
+            dialog.querySelector('button').addEventListener('click', () => dialog.remove());
+            document.body.append(dialog);
+          });
+        </script>
+      </main>` }));
+    await page.goto('https://agolde.com/products/romney-mid-rise-vintage-straight-leg-vanta');
+    const result = await page.evaluate(scanner);
+    assert.equal(result.page.store, 'AGOLDE');
+    assert.deepEqual(result.sizes.waist, ['23', '24', '25']);
+    assert.deepEqual(result.sizes.unavailable.waist, ['34']);
+    assert.equal(result.sizeGuides.length, 0);
+    assert.equal(result.sizeGuideStatus, 'image-only');
+    assert.ok(result.details.sizingAdvice.some(x => /true to size/i.test(x)));
+    assert.ok(result.details.inseam.some(x => /29"/.test(x)));
+    assert.ok(result.details.model.some(x => /size 27/i.test(x)));
+    assert.ok(result.details.materials.some(x => /100% Cotton/i.test(x)));
+    assert.equal(await page.locator('[role="dialog"]').count(), 0);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('AGOLDE uses its visible product name instead of the lowercase SEO title', async () => {
+  const result = await scan(`<title>arc jean petite loose wide 27 central – AGOLDE</title>
+    <meta property="og:title" content="arc jean petite loose wide 27 central">
+    <main><div id="ProductInformation-template__main" class="product-details">
+      <div class="group-block-content layout-panel-flex--row"><div><div style="font-size: 20px; text-transform: uppercase; font-weight: bold">Arc Jean Petite 27"</div></div><div>$268</div></div>
+      <select name="options[Size]"><option value="23">23 - Unavailable</option><option value="24">24 - Unavailable</option><option value="32">32</option></select>
+    </div></main>`, 'https://agolde.com/products/arc-jean-petite-loose-wide-27-central');
+  assert.equal(result.page.title, 'Arc Jean Petite 27"');
+  assert.deepEqual(result.sizes.unavailable.waist, ['23', '24']);
+  assert.deepEqual(result.sizes.waist, ['32']);
+});
+
 test('scanner includes the listing image when the page provides one', async () => {
   const result = await scan(`<meta property="og:image" content="https://example.com/jeans.jpg">
     <main><h1>Blue Jeans</h1><button>W24 L30</button></main>`,

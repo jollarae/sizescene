@@ -4,9 +4,11 @@
   const host = location.hostname.toLowerCase();
   const store = host.includes('levi.com') ? "Levi's" :
     host.includes('uniqlo.com') ? 'UNIQLO' :
-    host.includes('motelrocks.com') ? 'Motel Rocks' : 'Other';
+    host.includes('motelrocks.com') ? 'Motel Rocks' :
+    host.includes('agolde.com') ? 'AGOLDE' : 'Other';
   const root = document.querySelector('main') || document.body;
-  const title = clean(root.querySelector('h1')?.textContent ||
+  const agoldeTitle = store === 'AGOLDE' ? clean(root.querySelector('[id^="ProductInformation-"] .group-block-content.layout-panel-flex--row > div:first-child > div')?.textContent) : '';
+  const title = clean(agoldeTitle || root.querySelector('h1')?.textContent ||
     document.querySelector('meta[property="og:title"]')?.content || document.title);
   const imageSource = document.querySelector('meta[property="og:image"]')?.content;
   let image = null;
@@ -29,6 +31,7 @@
   function isUnavailable(control) {
     const elements = [control, ...control.querySelectorAll('*')];
     return control.matches(':disabled,[aria-disabled="true"],[data-sold-out="true"]') ||
+      (control.matches('option') && /\bunavailable\b|\bsold out\b/i.test(control.textContent)) ||
       /\bout of stock\b|\bsold out\b|\bunavailable\b/i.test(control.getAttribute('aria-label') || '') ||
       !!control.closest('[aria-disabled="true"],[data-sold-out="true"],.sold-out,.unavailable,.product-button-option__button-item--out-of-stock') ||
       elements.some(element => /sold.?out|out.?of.?stock|unavailable|is-disabled|strikethrough/i.test(element.className?.baseVal || element.className || '') ||
@@ -44,6 +47,21 @@
     if (control.closest('table,[class*="size-guide"],[id*="size-guide"]')) continue;
     if (store === 'Motel Rocks' && control.closest('fake-dropdown')) continue;
     if (control.matches('label') && control.closest('.radio__container')?.querySelector('input[type="radio"]')) continue;
+    if (control.matches('option')) {
+      const select = control.closest('select');
+      const kind = clean(select?.name || select?.getAttribute('aria-label') || '');
+      const value = clean(control.value);
+      if (/\b(?:size|waist)\b/i.test(kind) && sizePattern.test(value)) {
+        const target = isUnavailable(control) ? sizes.unavailable : sizes;
+        target.waist.push(value);
+        continue;
+      }
+      if (/\b(?:length|inseam|leg)\b/i.test(kind) && lengthPattern.test(value)) {
+        const target = isUnavailable(control) ? sizes.unavailable : sizes;
+        target.length.push(value);
+        continue;
+      }
+    }
     if (store === "Levi's" && control.matches('button[role="radio"]')) {
       const size = clean(control.getAttribute('aria-label')).match(/^(Waist|Length)\s+(\d{2})\b/i);
       if (size) {
@@ -90,6 +108,24 @@
       });
     }
   }
+  if (store === 'AGOLDE' && !document.querySelector('.kiwi-sizing-modal')) {
+    const trigger = optionsRoot.querySelector('.ks-chart-modal-link');
+    if (trigger) {
+      trigger.click();
+      openedGuide = await new Promise(resolve => {
+        const findGuide = () => document.querySelector('.kiwi-sizing-modal');
+        if (findGuide()?.querySelector('table,img')) return resolve(findGuide());
+        const observer = new MutationObserver(() => {
+          if (findGuide()?.querySelector('table,img')) {
+            observer.disconnect();
+            resolve(findGuide());
+          }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+        setTimeout(() => { observer.disconnect(); resolve(findGuide()); }, 3500);
+      });
+    }
+  }
 
   function nearestHeading(element) {
     let sibling = element.previousElementSibling;
@@ -100,6 +136,7 @@
     return clean(element.parentElement?.querySelector('h2,h3,h4')?.textContent || 'Size chart');
   }
   const sizeGuides = [];
+  let sizeGuideStatus = 'none';
   const seenGuideTables = new Set();
   for (const table of document.querySelectorAll('table')) {
     const originalRows = [...table.querySelectorAll('tr')].map(row =>
@@ -130,7 +167,9 @@
     }
     sizeGuides.push({ title, headers, rows: dataRows });
   }
-  if (openedGuide?.isConnected) openedGuide.querySelector('button.modal__close')?.click();
+  if (sizeGuides.length) sizeGuideStatus = 'table';
+  else if (document.querySelector('.kiwi-sizing-modal .ks-image img,.kiwi-sizing-modal img.ks-image')) sizeGuideStatus = 'image-only';
+  if (openedGuide?.isConnected) openedGuide.querySelector('button.modal__close,button.ks-modal-close')?.click();
 
   const details = { fit: [], rise: [], inseam: [], model: [], materials: [], sizingAdvice: [] };
   const detailNodes = root.querySelectorAll('p,li,dd,div,span,[class*="product-detail"],[class*="product-info"],[class*="description"]');
@@ -160,7 +199,9 @@
     const element = walker.currentNode;
     if (/^H[1-6]$/.test(element.tagName) && /^(?:customer\s+)?reviews?$/i.test(clean(element.textContent))) reviewsReached = true;
     if (reviewsReached || !eligible.has(element) || element.closest('nav,footer,header')) continue;
-    const value = clean(element.textContent);
+    const factElement = element.cloneNode(true);
+    factElement.querySelectorAll('br').forEach(br => br.replaceWith('|'));
+    const value = clean(factElement.textContent);
     if (value.length < 8 || value.length > 450) continue;
     for (const fact of splitFacts(value)) {
       const category = classifyFact(fact);
@@ -175,6 +216,6 @@
   const hasSizingInformation = ['waist', 'length', 'combined', 'other'].some(key =>
     sizes[key].length || sizes.unavailable[key].length) ||
     sizeGuides.length > 0 || Object.values(details).some(values => values.length);
-  return { page: { title, url: location.href, store, image }, sizes, sizeGuides, details,
+  return { page: { title, url: location.href, store, image }, sizes, sizeGuides, sizeGuideStatus, details,
     availability, hasSizingInformation, scannedAt: new Date().toISOString() };
 })()

@@ -97,10 +97,16 @@
       return { ...base, status: 'missing-profile', notes: ['Add waist, hip, and inseam measurements to get a recommendation.'] };
     }
 
-    const combined = scan?.sizes?.combined || [];
-    const separate = scan?.sizes?.waist || [];
+    const availableCombined = scan?.sizes?.combined || [];
+    const availableWaist = scan?.sizes?.waist || [];
+    const unavailableCombined = scan?.sizes?.unavailable?.combined || [];
+    const unavailableWaist = scan?.sizes?.unavailable?.waist || [];
+    const useCombined = availableCombined.length > 0 || (availableWaist.length === 0 && unavailableWaist.length === 0);
+    const combined = useCombined ? [...availableCombined, ...unavailableCombined] : [];
+    const separate = [...availableWaist, ...unavailableWaist];
     const options = combined.length ? combined : separate;
-    if (!options.length) return { ...base, notes: ['No available product sizes were found on this listing.'] };
+    const availableOptions = combined.length ? availableCombined : availableWaist;
+    if (!options.length) return { ...base, notes: ['No product sizes were found on this listing.'] };
 
     const widths = unique(options.map(optionWidth).filter(Number.isFinite)).sort((a, b) => a - b);
     const chart = chartMapping(scan, widths);
@@ -164,7 +170,14 @@
       return Math.abs((optionLength(choice) ?? wantedLength) - wantedLength) <
         Math.abs((optionLength(best) ?? wantedLength) - wantedLength) ? choice : best;
     }, null);
-    if (!size) return { ...base, notes: ['No available product size matches the selected fit.'] };
+    if (!size) return { ...base, notes: ['No product size matches the selected fit.'] };
+    const soldOut = !availableOptions.includes(size);
+    const availableSize = soldOut ? availableOptions.reduce((best, choice) => {
+      if (!best) return choice;
+      const distance = value => Math.abs((optionWidth(value) ?? 0) - (optionWidth(size) ?? 0)) * 10 +
+        Math.abs((optionLength(value) ?? wantedLength) - (optionLength(size) ?? wantedLength));
+      return distance(choice) < distance(best) ? choice : best;
+    }, null) : null;
     let combinationUnconfirmed = false;
     if (!combined.length && widths.length && (scan.sizes.length || []).length) {
       const lengths = (scan.sizes.length || []).map(value => Number(String(value).match(/^(?:L\s*)?(\d{2})$/i)?.[1])).filter(Number.isFinite);
@@ -179,11 +192,12 @@
     const notes = [];
     if (combinationUnconfirmed) notes.push('Waist and length are listed separately; confirm this exact combination is in stock on the product page.');
     if (evidence?.waistCm != null) reasons.push(`Your waist is ${waistCm} cm; the chart associates ${size} with about ${Math.round(evidence.waistCm)} cm.`);
-    else if (chosenWidth != null) reasons.push(`Your waist is ${waistCm} cm; ${size.match(/W?\s*\d{2}/)?.[0] || size} is the closest available numeric waist label.`);
+    else if (chosenWidth != null) reasons.push(`Your waist is ${waistCm} cm; ${size.match(/W?\s*\d{2}/)?.[0] || size} is the closest numeric waist label.`);
     if (evidence?.hipCm != null) reasons.push(`The chart lists about ${Math.round(evidence.hipCm)} cm at the hip; your hip is ${hipCm} cm.`);
     else notes.push('The listing does not provide a usable hip measurement, so hip fit cannot be checked.');
     if (evidence?.thighCm != null && Number.isFinite(thighCm)) reasons.push(`The chart lists about ${Math.round(evidence.thighCm)} cm at the thigh; your thigh is ${thighCm} cm.`);
     else if (evidence?.thighCm != null) notes.push('This chart lists thigh measurements; add yours in the three-dot menu to check leg room.');
+    else if (Number.isFinite(thighCm)) notes.push('Your thigh measurement was not used because the listing provides no readable thigh measurement.');
     const selectedLength = optionLength(size);
     if (selectedLength != null) {
       const difference = selectedLength * 2.54 - Number(profile.inseamCm);
@@ -196,13 +210,32 @@
           reasons.push(`Your height falls in the retailer’s ${guidance} length guide; L${selectedLength} is within that range.`);
         else notes.push(`Your height points to the retailer’s ${guidance} length range; the size shown follows your measured inseam instead.`);
       }
-    } else notes.push('The listing does not offer a separate inseam choice.');
+    } else {
+      const listedInseam = (scan?.details?.inseam || []).find(value => /\binseam\s*:/i.test(value));
+      const listedInseamCm = listedInseam ? measurementCm(listedInseam) : null;
+      if (listedInseamCm != null) {
+        const difference = listedInseamCm - Number(profile.inseamCm);
+        const inches = Math.round(toInches(listedInseamCm) * 10) / 10;
+        notes.push(`This style lists a fixed ${inches} in inseam, about ${Math.round(Math.abs(difference))} cm ${difference >= 0 ? 'longer' : 'shorter'} than your ${profile.inseamCm} cm inseam; no length choice is offered.`);
+      } else notes.push('The listing does not offer a separate inseam choice or provide a usable fixed inseam.');
+    }
     const status = evidence && (chart.direct > 0 || !widths.length) ? 'recommended' : 'tentative';
-    if (status === 'tentative') notes.unshift('This is a label-based estimate; a matching body size chart was not found.');
+    if (status === 'tentative') notes.unshift(scan?.sizeGuideStatus === 'image-only' ?
+      'This is a label-based estimate. The retailer’s size chart is an image, so its body measurements cannot be read automatically.' :
+      'This is a label-based estimate; a matching body size chart was not found.');
+    if (Number.isFinite(Number(profile.heightCm)) && Number(profile.heightCm) > 0 && !heightLengthRange(scan, profile.heightCm))
+      notes.push('Your height was not used because the listing provides no readable height-based length guide.');
     if (adviceApplied) reasons.push(`The listing says this style ${adviceShift > 0 ? 'runs small' : 'runs large'}, so the starting size was adjusted by one waist size.`);
-    if (preferenceLimited) notes.push(`No ${preference === 'closer' ? 'smaller' : 'larger'} available size was found for this fit preference.`);
+    if (preferenceLimited) notes.push(`No ${preference === 'closer' ? 'smaller' : 'larger'} product size was found for this fit preference.`);
     else if (preference !== 'as-designed') reasons.push(`Selected for a ${preference === 'closer' ? 'closer' : 'roomier'} fit than the product’s intended silhouette.`);
-    return { status, size, naturalFit: base.naturalFit, reasons, notes };
+    if (soldOut) {
+      notes.unshift(`${size} appears sold out on this listing.`);
+      if (availableSize) {
+        const widthGap = Math.abs((optionWidth(availableSize) ?? 0) - (optionWidth(size) ?? 0));
+        notes.push(`${availableSize} is the closest available size${widthGap >= 2 ? ', but it may fit substantially differently' : ''}.`);
+      } else notes.push('No sizes currently appear available on this listing.');
+    }
+    return { status, size, soldOut, availableSize, naturalFit: base.naturalFit, reasons, notes };
   }
 
   return { recommend };
