@@ -5,7 +5,8 @@
   const store = host.includes('levi.com') ? "Levi's" :
     host.includes('uniqlo.com') ? 'UNIQLO' :
     host.includes('motelrocks.com') ? 'Motel Rocks' :
-    host.includes('agolde.com') ? 'AGOLDE' : 'Other';
+    host.includes('agolde.com') ? 'AGOLDE' :
+    host.includes('tankair.com') ? 'Tank Air' : 'Other';
   const root = document.querySelector('main') || document.body;
   const agoldeTitle = store === 'AGOLDE' ? clean(root.querySelector('[id^="ProductInformation-"] .group-block-content.layout-panel-flex--row > div:first-child > div')?.textContent) : '';
   const title = clean(agoldeTitle || root.querySelector('h1')?.textContent ||
@@ -41,7 +42,16 @@
   // main product. Its product form contains the actual orderable variants.
   const optionsRoot = store === 'Motel Rocks' ?
     (root.querySelector('product-form#productForm') || root) :
-    store === "Levi's" ? (root.querySelector('#pdp-product-content') || root) : root;
+    store === "Levi's" ? (root.querySelector('#pdp-product-content') || root) :
+    store === 'Tank Air' ? (root.querySelector('[data-testid="pdp-mobile-size-select"]') || root) : root;
+  if (store === 'Tank Air') {
+    for (const option of optionsRoot.querySelectorAll('[data-testid="pdp-size-option"]')) {
+      const label = clean(option.textContent);
+      if (!/^\d{2}$/.test(label)) continue;
+      const unavailable = /\bopacity-40\b/.test(option.className) || isUnavailable(option);
+      (unavailable ? sizes.unavailable : sizes).waist.push(label);
+    }
+  }
   const controls = optionsRoot.querySelectorAll('button, option, select, input[type="radio"], input[type="checkbox"], label, [role="option"], [role="radio"], [role="checkbox"]');
   for (const control of controls) {
     if (control.closest('table,[class*="size-guide"],[id*="size-guide"]')) continue;
@@ -166,6 +176,43 @@
       else if (/\d\s*(?:"|″|in\b)/i.test(values)) title += ' · inches';
     }
     sizeGuides.push({ title, headers, rows: dataRows });
+  }
+  if (store === 'Tank Air') {
+    function readGrid(kind) {
+      const panel = document.querySelector(`#size-guide-panel-${kind}`);
+      if (!panel) return;
+      const rows = [...panel.querySelectorAll('.grid')].map(row =>
+        [...row.children].map(cell => clean(cell.textContent)))
+        .filter(row => row.length > 1 && (/^size$/i.test(row[0]) || /^\d{2}$/.test(row[0])));
+      if (rows.length < 2 || !/^size$/i.test(rows[0][0])) return;
+      const unit = /\bcm\b/i.test(panel.querySelector('button[aria-pressed="true"]')?.textContent || '') ? 'cm' : 'in';
+      const headers = rows[0].map((value, index) => index === 0 ? value :
+        `${value.replace(/^\d+\.\s*/, '')} (${unit})`);
+      const dataRows = rows.slice(1).filter(row => row.length === headers.length);
+      if (dataRows.length) sizeGuides.push({ title: `${kind === 'body' ? 'Body' : 'Garment'} size chart`, headers, rows: dataRows });
+    }
+    readGrid('garment');
+    const bodyTab = document.querySelector('#size-guide-tab-body');
+    const garmentTab = document.querySelector('#size-guide-tab-garment');
+    let switchedToBody = false;
+    if (bodyTab && !document.querySelector('#size-guide-panel-body')) {
+      switchedToBody = true;
+      bodyTab.click();
+      if (!document.querySelector('#size-guide-panel-body')) {
+        await new Promise(resolve => {
+          const observer = new MutationObserver(() => {
+            if (document.querySelector('#size-guide-panel-body')) {
+              observer.disconnect();
+              resolve();
+            }
+          });
+          observer.observe(document.body, { childList: true, subtree: true });
+          setTimeout(() => { observer.disconnect(); resolve(); }, 1000);
+        });
+      }
+    }
+    readGrid('body');
+    if (switchedToBody && garmentTab && bodyTab?.getAttribute('aria-selected') === 'true') garmentTab.click();
   }
   if (sizeGuides.length) sizeGuideStatus = 'table';
   else if (document.querySelector('.kiwi-sizing-modal .ks-image img,.kiwi-sizing-modal img.ks-image')) sizeGuideStatus = 'image-only';

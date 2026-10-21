@@ -131,6 +131,49 @@ test('AGOLDE uses its visible product name instead of the lowercase SEO title', 
   assert.deepEqual(result.sizes.waist, ['32']);
 });
 
+test('Tank Air reads its own numeric options and body grid without treating related items as options', async () => {
+  const result = await scan(`
+    <main><h1>Cigarette Jeans in Indigo</h1>
+      <div data-testid="pdp-mobile-size-select">
+        <div data-testid="pdp-size-option" tabindex="0" aria-label="Select Size: 23" class="opacity-40"><span>23</span></div>
+        <div data-testid="pdp-size-option" tabindex="0" aria-label="Select Size: 24" class="opacity-40"><span>24</span></div>
+        <div data-testid="pdp-size-option" tabindex="0" aria-label="Select Size: 25"><span>25</span></div>
+      </div>
+      <div class="whitespace-pre-line leading-snug">Very close fit, straight-leg jeans in non-stretch denim. 100% Cotton.</div>
+      <button aria-label="Select XS" disabled>XS</button>
+    </main>
+    <div role="dialog" aria-label="Size guide" aria-hidden="true" inert>
+      <div role="tablist" aria-label="Size guide sections">
+        <button id="size-guide-tab-garment" role="tab" aria-selected="true">garment</button>
+        <button id="size-guide-tab-body" role="tab" aria-selected="false">body</button>
+      </div>
+      <div id="size-guide-panel-garment" role="tabpanel">
+        <div class="grid"><div>SIZE</div><div>1. LOW WAIST</div><div>2. HIP</div><div>3. THIGH</div><div>5. INSEAM</div></div>
+        <div class="grid"><div>23</div><div>27.5</div><div>33</div><div>19.5</div><div>32.5</div></div>
+        <div class="grid"><div>24</div><div>28</div><div>34</div><div>20</div><div>32.5</div></div>
+        <button aria-pressed="true">IN</button><button aria-pressed="false">CM</button>
+      </div>
+    </div>
+    <script>
+      document.querySelector('#size-guide-tab-body').addEventListener('click', () => {
+        document.querySelector('#size-guide-tab-body').setAttribute('aria-selected', 'true');
+        document.querySelector('#size-guide-tab-garment').setAttribute('aria-selected', 'false');
+        document.querySelector('#size-guide-panel-garment').remove();
+        const panel = document.createElement('div');
+        panel.id = 'size-guide-panel-body';
+        panel.setAttribute('role', 'tabpanel');
+        panel.innerHTML = '<div class="grid"><div>SIZE</div><div>WAIST</div><div>HIP</div></div><div class="grid"><div>23</div><div>23</div><div>33</div></div><div class="grid"><div>24</div><div>24</div><div>34</div></div>';
+        document.querySelector('[role="dialog"]').append(panel);
+      });
+    </script>`, 'https://tankair.com/products/cigarette-jeans-indigo');
+  assert.equal(result.page.store, 'Tank Air');
+  assert.deepEqual(result.sizes.waist, ['25']);
+  assert.deepEqual(result.sizes.unavailable.waist, ['23', '24']);
+  assert.equal(result.sizeGuides.find(guide => /garment/i.test(guide.title)).rows[0][1], '27.5');
+  assert.deepEqual(result.sizeGuides.find(guide => /body/i.test(guide.title)).rows[1], ['24', '24', '34']);
+  assert.ok(result.details.fit.some(value => /Very close fit/i.test(value)));
+});
+
 test('scanner includes the listing image when the page provides one', async () => {
   const result = await scan(`<meta property="og:image" content="https://example.com/jeans.jpg">
     <main><h1>Blue Jeans</h1><button>W24 L30</button></main>`,

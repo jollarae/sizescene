@@ -8,10 +8,13 @@
 </head>
 <body>
   <header>
-    <div class="topline"><span class="eyebrow">SIZESCENE</span><a class="menu-link" href="measurements.html" aria-label="Edit body measurements">⋮</a></div>
-    <h1>Find your fit</h1>
-    <p>Size guidance for the jeans page you have open.</p>
-    <button id="scan" type="button">Refresh scan</button>
+    <div class="topline">
+      <span class="eyebrow">SIZESCENE</span>
+      <div class="header-actions">
+        <button id="scan" type="button">Rescan</button>
+        <a class="menu-link" href="measurements.html" aria-label="Edit body measurements">⋮</a>
+      </div>
+    </div>
   </header>
   <main id="results" aria-live="polite"><p class="message">Ready to scan.</p></main>
   <script src="recommendation.js"></script>

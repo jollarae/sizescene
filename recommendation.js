@@ -29,6 +29,8 @@
   function chartMapping(scan, widths) {
     let best = { rows: new Map(), direct: 0, ordered: 0 };
     for (const guide of scan.sizeGuides || []) {
+      // A garment chart measures the jeans, not the shopper's body.
+      if (/\bgarment\b/i.test(guide.title || '')) continue;
       const headers = guide.headers || [];
       const waistIndex = headers.findIndex(value => /\bwaist\b/i.test(value));
       if (waistIndex < 0) continue;
@@ -194,10 +196,7 @@
     if (evidence?.waistCm != null) reasons.push(`Your waist is ${waistCm} cm; the chart associates ${size} with about ${Math.round(evidence.waistCm)} cm.`);
     else if (chosenWidth != null) reasons.push(`Your waist is ${waistCm} cm; ${size.match(/W?\s*\d{2}/)?.[0] || size} is the closest numeric waist label.`);
     if (evidence?.hipCm != null) reasons.push(`The chart lists about ${Math.round(evidence.hipCm)} cm at the hip; your hip is ${hipCm} cm.`);
-    else notes.push('The listing does not provide a usable hip measurement, so hip fit cannot be checked.');
     if (evidence?.thighCm != null && Number.isFinite(thighCm)) reasons.push(`The chart lists about ${Math.round(evidence.thighCm)} cm at the thigh; your thigh is ${thighCm} cm.`);
-    else if (evidence?.thighCm != null) notes.push('This chart lists thigh measurements; add yours in the three-dot menu to check leg room.');
-    else if (Number.isFinite(thighCm)) notes.push('Your thigh measurement was not used because the listing provides no readable thigh measurement.');
     const selectedLength = optionLength(size);
     if (selectedLength != null) {
       const difference = selectedLength * 2.54 - Number(profile.inseamCm);
@@ -216,15 +215,11 @@
       if (listedInseamCm != null) {
         const difference = listedInseamCm - Number(profile.inseamCm);
         const inches = Math.round(toInches(listedInseamCm) * 10) / 10;
-        notes.push(`This style lists a fixed ${inches} in inseam, about ${Math.round(Math.abs(difference))} cm ${difference >= 0 ? 'longer' : 'shorter'} than your ${profile.inseamCm} cm inseam; no length choice is offered.`);
-      } else notes.push('The listing does not offer a separate inseam choice or provide a usable fixed inseam.');
+        notes.push(`This style lists a fixed ${inches} in inseam, about ${Math.round(Math.abs(difference))} cm ${difference >= 0 ? 'longer' : 'shorter'} than your ${profile.inseamCm} cm inseam.`);
+      }
     }
     const status = evidence && (chart.direct > 0 || !widths.length) ? 'recommended' : 'tentative';
-    if (status === 'tentative') notes.unshift(scan?.sizeGuideStatus === 'image-only' ?
-      'This is a label-based estimate. The retailer’s size chart is an image, so its body measurements cannot be read automatically.' :
-      'This is a label-based estimate; a matching body size chart was not found.');
-    if (Number.isFinite(Number(profile.heightCm)) && Number(profile.heightCm) > 0 && !heightLengthRange(scan, profile.heightCm))
-      notes.push('Your height was not used because the listing provides no readable height-based length guide.');
+    if (status === 'tentative') notes.unshift('Fit estimate based on the retailer’s listed sizes and fit guidance; actual fit may vary.');
     if (adviceApplied) reasons.push(`The listing says this style ${adviceShift > 0 ? 'runs small' : 'runs large'}, so the starting size was adjusted by one waist size.`);
     if (preferenceLimited) notes.push(`No ${preference === 'closer' ? 'smaller' : 'larger'} product size was found for this fit preference.`);
     else if (preference !== 'as-designed') reasons.push(`Selected for a ${preference === 'closer' ? 'closer' : 'roomier'} fit than the product’s intended silhouette.`);

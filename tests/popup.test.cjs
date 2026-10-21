@@ -11,7 +11,7 @@ test('popup scans the active tab and displays collected sizing evidence', async 
     await page.addInitScript(() => {
       window.chrome.tabs = { query: async () => [{ id: 17 }] };
       window.chrome.scripting = { executeScript: async () => [{ result: {
-        page: { store: "Levi's", title: "Low Loose Women's Jeans", url: 'https://www.levi.com/example' },
+        page: { store: "Levi's", title: "Low Loose Women's Jeans", url: 'https://www.levi.com/example', image: 'https://example.com/jeans.jpg' },
         sizes: { waist: ['23', '24'], length: ['30', '32'], combined: [], other: [] },
         sizeGuides: [{ title: 'Size Guide', headers: ['Size', 'Waist'], rows: [['24', '25.25']] }],
         details: { sizingAdvice: ['Runs a bit small'], fit: ['Relaxed through the hip'], rise: [], inseam: [], model: [], materials: [] },
@@ -20,6 +20,12 @@ test('popup scans the active tab and displays collected sizing evidence', async 
     });
     await page.goto(pathToFileURL(path.join(__dirname, '..', 'popup.html')).href);
     await page.getByText('Low Loose Women\'s Jeans').waitFor();
+    assert.equal(await page.locator('.product-photo').isVisible(), true);
+    assert.ok(await page.locator('.product-photo').evaluate(image => image.getBoundingClientRect().width) <= 100);
+    assert.equal(await page.getByText('Why this size?').count(), 1);
+    assert.equal(await page.locator('[data-section="size-guide"]').isVisible(), false);
+    await page.getByText('Why this size?').click();
+    assert.equal(await page.locator('[data-section="size-guide"]').isVisible(), true);
     assert.equal(await page.locator('table tbody tr').innerText(), '24\t25.25');
     assert.equal(await page.getByText('Runs a bit small').count(), 1);
     assert.equal(await page.getByText('No jeans sizing details were found').count(), 0);
@@ -44,12 +50,15 @@ test('popup distinguishes purchasable W/L options from XS chart reference rows',
     });
     await page.goto(pathToFileURL(path.join(__dirname, '..', 'popup.html')).href);
     await page.getByText('Roomy Jeans').waitFor();
+    assert.equal(await page.locator('[data-section="product-options"]').isVisible(), false);
+    await page.getByText('Why this size?').click();
     const options = page.locator('[data-section="product-options"]');
     const chart = page.locator('[data-section="size-guide"]');
     assert.equal(await options.getByText('W24 L30').count(), 1);
     assert.equal(await options.getByText('XS').count(), 0);
     assert.equal(await options.locator('.unavailable-size').getByText('W26 L30').count(), 1);
     assert.equal(await chart.locator('td').getByText('XS', { exact: true }).count(), 1);
+    assert.equal(await page.getByText('Fit and product details').count(), 0);
   } finally {
     await browser.close();
   }
@@ -77,7 +86,7 @@ test('popup reveals its recommendation after a scan sequence and replays loading
     assert.equal(await page.locator('[data-section="recommendation"]').count(), 0);
     await page.getByText('W24 L30', { exact: true }).first().waitFor();
     assert.equal(await page.locator('[data-section="recommendation"] .recommended-size').innerText(), 'W24 L30');
-    assert.match(await page.locator('[data-section="natural-fit"]').innerText(), /Wide leg fit/);
+    assert.match(await page.locator('.fit-summary').innerText(), /Wide leg fit/);
     await page.getByRole('button', { name: 'Roomier' }).click();
     assert.equal(await page.locator('.loading-panel').isVisible(), true);
     assert.match(await page.locator('.loading-panel').innerText(), /rechecking available sizes/i);
@@ -117,7 +126,7 @@ test('measurements page loads the local profile and saves edits', async () => {
   }
 });
 
-test('popup explains an image-only chart instead of asking the shopper to rescan', async () => {
+test('popup gives one concise estimate qualifier when the chart is image-only', async () => {
   const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
   try {
     const page = await browser.newPage();
@@ -135,8 +144,12 @@ test('popup explains an image-only chart instead of asking the shopper to rescan
     await page.getByText('Romney Jean').waitFor();
     assert.equal(await page.locator('[data-section="recommendation"] h3').innerText(), 'Your size estimate');
     assert.equal(await page.locator('[data-section="recommendation"] .recommended-size').innerText(), '24');
-    assert.match(await page.locator('[data-section="size-guide"]').innerText(), /image.*cannot|image.*read/i);
+    assert.match(await page.locator('[data-section="recommendation"]').innerText(), /estimate.*listed sizes/i);
+    assert.equal(await page.locator('[data-section="size-guide"]').isVisible(), false);
+    await page.getByText('Why this size?').click();
+    assert.match(await page.locator('[data-section="size-guide"]').innerText(), /view.*guide.*product page/i);
     assert.doesNotMatch(await page.locator('[data-section="size-guide"]').innerText(), /scan again/i);
+    assert.doesNotMatch(await page.locator('.size-details').innerText(), /not used|cannot be checked|does not provide a usable/i);
   } finally {
     await browser.close();
   }

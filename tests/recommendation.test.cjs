@@ -59,7 +59,8 @@ test('without a chart, numeric W/L labels give a tentative recommendation', () =
   const result = recommend(scan, profile, 'as-designed');
   assert.equal(result.status, 'tentative');
   assert.equal(result.size, 'W24 L30');
-  assert.ok(result.notes.some(value => /chart|hip/i.test(value)));
+  assert.ok(result.notes.some(value => /estimate.*listed sizes/i.test(value)));
+  assert.ok(result.notes.every(value => !/not used|cannot be checked|does not provide/i.test(value)));
 });
 
 test('letter-only options without a matching chart do not produce a guessed size', () => {
@@ -145,10 +146,37 @@ test('AGOLDE numeric sizes yield a qualified estimate and account for its fixed 
   const result = recommend(scan, { ...profile, heightCm: 158, thighCm: 49 }, 'as-designed');
   assert.equal(result.status, 'tentative');
   assert.equal(result.size, '24');
-  assert.ok(result.notes.some(x => /image/i.test(x)));
+  assert.equal(result.notes.filter(x => /estimate/i.test(x)).length, 1);
+  assert.ok(result.notes.some(x => /listed sizes/i.test(x)));
   assert.ok(result.notes.some(x => /29.*72|72.*29/.test(x)));
-  assert.ok(result.notes.some(x => /hip/i.test(x)));
-  assert.ok(result.notes.some(x => /thigh.*not|thigh.*cannot/i.test(x)));
-  assert.ok(result.notes.some(x => /height.*not|height.*cannot/i.test(x)));
+  assert.ok(result.notes.every(x => !/not used|cannot be checked|does not provide|no readable/i.test(x)));
   assert.equal(recommend(scan, profile, 'roomier').size, '25');
+});
+
+test('Tank Air uses body chart instead of jeans garment dimensions', () => {
+  const scan = {
+    sizes: { waist: ['25'], length: [], combined: [], other: [], unavailable: { waist: ['23', '24'], length: [], combined: [], other: [] } },
+    sizeGuides: [
+      { title: 'Garment size chart', headers: ['SIZE', 'LOW WAIST (in)', 'HIP (in)'], rows: [['23', '27.5', '33'], ['24', '28', '34'], ['25', '29', '35']] },
+      { title: 'Body size chart', headers: ['SIZE', 'WAIST (in)', 'HIP (in)'], rows: [['23', '23', '33'], ['24', '24', '34'], ['25', '25', '35']] }
+    ],
+    details: { fit: ['Very close fit'], rise: [], model: [], materials: [], inseam: [], sizingAdvice: [] }
+  };
+  const result = recommend(scan, profile);
+  assert.equal(result.size, '24');
+  assert.equal(result.soldOut, true);
+  assert.equal(result.availableSize, '25');
+  assert.equal(result.status, 'recommended');
+  assert.ok(result.reasons.some(value => /waist.*about 61 cm/i.test(value)));
+});
+
+test('Tank Air garment-only chart yields a qualified numeric estimate', () => {
+  const scan = {
+    sizes: { waist: ['23', '24', '25'], length: [], combined: [], other: [], unavailable: { waist: [], length: [], combined: [], other: [] } },
+    sizeGuides: [{ title: 'Garment size chart', headers: ['SIZE', 'LOW WAIST (in)', 'HIP (in)'], rows: [['23', '27.5', '33'], ['24', '28', '34'], ['25', '29', '35']] }],
+    details: { fit: ['Very close fit'], rise: [], model: [], materials: [], inseam: [], sizingAdvice: [] }
+  };
+  const result = recommend(scan, profile);
+  assert.equal(result.size, '24');
+  assert.equal(result.status, 'tentative');
 });

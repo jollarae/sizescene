@@ -21,6 +21,8 @@ Some retailers load size charts only after you open their **Size Guide**. If the
 
 On AGOLDE, the product sizes are in a dropdown and the size chart opens as an image. The extension reads the orderable sizes, stock labels, fit notes, and listed inseam, but it cannot extract body measurements from the image. It therefore marks the numeric recommendation as an estimate and names the fit checks it cannot make.
 
+On Tank Air, the extension reads the numeric product choices and its grid-based size guide. It uses body measurements from the **Body** chart for a recommendation when available. The **Garment** chart describes the jeans themselves and is shown as reference information; if only garment measurements can be read, the numeric recommendation is labeled an estimate.
+
 ## Test
 
 The tests use local sample product pages in headless Chrome and pure recommendation tests in Node.js. With Node.js and Playwright available, run `node --test tests/*.test.cjs`.
