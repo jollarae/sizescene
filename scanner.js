@@ -6,8 +6,32 @@
     host.includes('uniqlo.com') ? 'UNIQLO' :
     host.includes('motelrocks.com') ? 'Motel Rocks' :
     host.includes('agolde.com') ? 'AGOLDE' :
+    host.includes('withjean.com') ? 'With Jéan' :
     host.includes('tankair.com') ? 'Tank Air' : 'Other';
   const root = document.querySelector('main') || document.body;
+  const siteName = clean(document.querySelector('meta[property="og:site_name"]')?.content);
+  function structuredProductBrand() {
+    for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+      let data;
+      try { data = JSON.parse(script.textContent); } catch { continue; }
+      const entries = Array.isArray(data) ? data : (Array.isArray(data?.['@graph']) ? data['@graph'] : [data]);
+      for (const entry of entries) {
+        const types = Array.isArray(entry?.['@type']) ? entry['@type'] : [entry?.['@type']];
+        if (!types.some(type => /^(?:Product|ProductGroup)$/i.test(type || ''))) continue;
+        const name = clean(typeof entry.brand === 'string' ? entry.brand : entry.brand?.name);
+        if (name && name.length <= 60) return name;
+      }
+    }
+    return '';
+  }
+  const brandNames = { 'CHEAP MONDAY': 'Cheap Monday', WEEKDAY: 'Weekday', MONKI: 'Monki' };
+  const labelBrand = clean(root.querySelector('[data-testid="product-brand-name"]')?.textContent);
+  const structuredBrand = structuredProductBrand();
+  const siteSlug = siteName.toLowerCase().replace(/\s+/g, '-');
+  const productBrand = structuredBrand.toLowerCase().startsWith(`${siteSlug}-`) ? siteName : structuredBrand;
+  const rawBrand = (labelBrand.length <= 60 && labelBrand) || productBrand || siteName ||
+    (host === 'weekday.com' || host.endsWith('.weekday.com') ? 'Weekday' : store);
+  const brand = brandNames[rawBrand.toUpperCase()] || (rawBrand === 'Other' ? 'Brand unavailable' : rawBrand);
   const agoldeTitle = store === 'AGOLDE' ? clean(root.querySelector('[id^="ProductInformation-"] .group-block-content.layout-panel-flex--row > div:first-child > div')?.textContent) : '';
   const title = clean(agoldeTitle || root.querySelector('h1')?.textContent ||
     document.querySelector('meta[property="og:title"]')?.content || document.title);
@@ -138,21 +162,43 @@
   }
 
   function nearestHeading(element) {
-    let sibling = element.previousElementSibling;
-    while (sibling) {
-      if (/^H[2-6]$/.test(sibling.tagName)) return clean(sibling.textContent);
-      sibling = sibling.previousElementSibling;
+    for (let node = element; node && node !== root; node = node.parentElement) {
+      let sibling = node.previousElementSibling;
+      while (sibling) {
+        if (/^H[2-6]$/.test(sibling.tagName)) return clean(sibling.textContent);
+        sibling = sibling.previousElementSibling;
+      }
     }
     return clean(element.parentElement?.querySelector('h2,h3,h4')?.textContent || 'Size chart');
+  }
+  function chartCell(cell) {
+    const taggedCm = cell.querySelector('[data-unit="cm"]');
+    if (taggedCm) return `${clean(taggedCm.textContent)} cm`;
+    const parts = [...cell.querySelectorAll('span')].filter(span => !span.querySelector('span'))
+      .map(span => clean(span.textContent)).filter(Boolean);
+    if (parts.length > 1) {
+      const centimeters = parts.find(part => /\bcm\b/i.test(part));
+      if (centimeters) return centimeters;
+      if (parts.every(part => /\d/.test(part))) return parts[0];
+    }
+    return clean(cell.textContent);
   }
   const sizeGuides = [];
   let sizeGuideStatus = 'none';
   const seenGuideTables = new Set();
   for (const table of document.querySelectorAll('table')) {
     const originalRows = [...table.querySelectorAll('tr')].map(row =>
-      [...row.querySelectorAll('th,td')].map(cell => clean(cell.textContent))).filter(row => row.length);
+      [...row.querySelectorAll('th,td')].map(chartCell)).filter(row => row.length);
     let rows = originalRows;
     const caption = clean(table.querySelector('caption')?.textContent);
+    if (/^measurement$/i.test(rows[0]?.[0] || '') && rows[0].length > 2 &&
+        rows[0].slice(1).every(value => sizePattern.test(value)) &&
+        rows.some(row => /^waist$/i.test(row[0]))) {
+      const fields = rows.slice(1).filter(row => /^(?:Waist|Hip|Thigh|Inseam|Leg Length)$/i.test(row[0]));
+      const headers = ['Size', ...fields.map(row => `${row[0]} (${/\bcm\b/i.test(row.slice(1).join(' ')) ? 'cm' : 'in'})`)];
+      rows = [headers, ...rows[0].slice(1).map((size, index) =>
+        [size, ...fields.map(row => row[index + 1] || '')])];
+    }
     if (store === "Levi's" && /Levi's Size/i.test(rows[0]?.[0] || '') && rows[0].length > 2) {
       const fields = rows.slice(1).filter(row => /^(?:Numeric Size|Alpha Size|Your Waist|Your Hip|Your Thigh)/i.test(row[0]));
       const headers = ['Size', ...fields.map(row => row[0])];
@@ -257,12 +303,23 @@
   }
   for (const key of Object.keys(details)) details[key] = unique(details[key]).slice(0, 20);
 
-  const statusText = clean(root.textContent).slice(0, 12000);
-  const availability = /SOLD\s+OUT/i.test(statusText) ? 'Sold out' :
-    /OUT\s+OF\s+STOCK/i.test(statusText) ? 'Out of stock' : 'Unknown';
+  const statusScope = root.querySelector('[id^="ProductInfo-"], product-form#productForm, #pdp-product-content') || root;
+  const visible = element => {
+    if (element.closest('[hidden],[aria-hidden="true"]')) return false;
+    for (let node = element; node && node !== document.body; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (style.display === 'none' || style.visibility === 'hidden') return false;
+    }
+    return true;
+  };
+  const productStatus = [...statusScope.querySelectorAll('button, [data-badge-type="out-of-stock"]')]
+    .filter(visible).map(element => clean(element.textContent))
+    .find(text => /^(?:sold out|out of stock)$/i.test(text));
+  const availability = /^sold out$/i.test(productStatus || '') ? 'Sold out' :
+    /^out of stock$/i.test(productStatus || '') ? 'Out of stock' : 'Unknown';
   const hasSizingInformation = ['waist', 'length', 'combined', 'other'].some(key =>
     sizes[key].length || sizes.unavailable[key].length) ||
     sizeGuides.length > 0 || Object.values(details).some(values => values.length);
-  return { page: { title, url: location.href, store, image }, sizes, sizeGuides, sizeGuideStatus, details,
+  return { page: { title, url: location.href, store, brand, image }, sizes, sizeGuides, sizeGuideStatus, details,
     availability, hasSizingInformation, scannedAt: new Date().toISOString() };
 })()

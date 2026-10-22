@@ -32,7 +32,30 @@
       <button type="submit">Save measurements</button>
       <p id="save-status" role="status" class="note"></p>
     </form>
+    <section class="account-section" aria-labelledby="account-heading">
+      <h2 id="account-heading">AI scan access</h2>
+      <p class="note">Sign in once to test AI scanning on stores the local scanner cannot read. Your body measurements stay on this device.</p>
+      <form id="email-form" class="account-form">
+        <label for="account-email">Email</label>
+        <input id="account-email" type="email" autocomplete="email" required>
+        <button type="submit">Email me a sign-in link</button>
+      </form>
+      <form id="code-form" class="account-form" hidden>
+        <label for="account-code">Sign-in link or redirect address</label>
+        <input id="account-code" type="url" placeholder="Paste the full address here" required>
+        <p class="note">Copy the email button’s link address here. If you already opened it and saw a localhost error, copy the full address from that tab’s address bar instead.</p>
+        <button type="submit">Sign in</button>
+      </form>
+      <div id="signed-in" hidden>
+        <p id="signed-in-email" class="note"></p>
+        <button id="sign-out" type="button">Sign out</button>
+      </div>
+      <p id="account-status" role="status" class="note"></p>
+    </section>
   </main>
   <script src="measurements.js"></script>
+  <script src="ai-config.js"></script>
+  <script src="auth.js"></script>
+  <script src="auth-ui.js"></script>
 </body>
 </html>

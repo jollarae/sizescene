@@ -223,12 +223,60 @@ test('Motel listing captures combined W/L variants and sold-out status', async (
   assert.ok(result.details.model.some(x => x.includes('W26/L34')));
 });
 
+test('FRAME does not call the product sold out when one size or a related item is sold out', async () => {
+  const result = await scan(`
+    <main><div id="ProductInfo-main"><h1>The Gray</h1>
+      <div>Size <label>23<span class="sr-only">Variant sold out or unavailable</span></label>
+        <button>24</button><button>25</button></div>
+      <span hidden data-badge-type="out-of-stock">Out of stock</span>
+      <button type="submit" name="add">Add to bag</button>
+    </div><section><h2>Style With</h2><button disabled>SOLD OUT</button></section></main>`,
+  'https://frame-store.com/products/the-gray-tolerate?variant=44743917076656');
+  assert.equal(result.availability, 'Unknown');
+});
+
 test('unrelated page returns a clear empty scan', async () => {
   const result = await scan('<main><h1>Welcome</h1><p>Nothing for sale here.</p></main>', 'https://example.com/');
   assert.equal(result.page.store, 'Other');
+  assert.equal(result.page.brand, 'Brand unavailable');
   assert.deepEqual(result.sizes.waist, []);
   assert.deepEqual(result.sizeGuides, []);
   assert.equal(result.hasSizingInformation, false);
+});
+
+test('Weekday listing uses the product brand rather than the marketplace name', async () => {
+  const result = await scan(`
+    <main><div data-testid="product-brand-name">CHEAP MONDAY</div>
+      <h1>BOOTY BEI LOW RISE SKINNY BOOTCUT JEANS</h1></main>`,
+  'https://www.weekday.com/en-ww/p/women/jeans/booty-bei-1228331017/');
+  assert.equal(result.page.brand, 'Cheap Monday');
+  assert.equal(result.page.store, 'Other');
+});
+
+test('Weekday listing uses its retailer name when product brand is absent', async () => {
+  const result = await scan('<main><h1>Arrow Jeans</h1></main>',
+    'https://www.weekday.com/en-ww/p/women/jeans/arrow-0938606058/');
+  assert.equal(result.page.brand, 'Weekday');
+});
+
+test('FRAME listing reads the site brand when structured product brand is an internal slug', async () => {
+  const result = await scan(`
+    <meta property="og:site_name" content="FRAME">
+    <script type="application/ld+json">{"@type":"ProductGroup","brand":{"@type":"Brand","name":"frame-denim"}}</script>
+    <script type="application/ld+json">{"@type":"Organization","name":"FRAME", bad json}</script>
+    <main><h1>The Gray</h1><div>Size <button>24</button></div></main>`,
+  'https://frame-store.com/collections/denim-women/products/the-gray-2055105-rins');
+  assert.equal(result.page.brand, 'FRAME');
+  assert.deepEqual(result.sizes.waist, ['24']);
+});
+
+test('product structured brand takes precedence over the retailer site name', async () => {
+  const result = await scan(`
+    <meta property="og:site_name" content="Multi Brand Shop">
+    <script type="application/ld+json">[{"@type":"Product","brand":{"@type":"Brand","name":"Acme Denim"}}]</script>
+    <main><h1>Wide Leg Jeans</h1></main>`,
+  'https://shop.example.com/products/wide-leg-jeans');
+  assert.equal(result.page.brand, 'Acme Denim');
 });
 
 test('plain product detail blocks are captured without review text', async () => {
@@ -280,6 +328,26 @@ test('repeated centimeter and inch size charts are each shown once', async () =>
   assert.match(result.sizeGuides[1].title, /inch/i);
   assert.equal(result.sizeGuides[0].rows[0][2], '64cm');
   assert.equal(result.sizeGuides[1].rows[0][2], '24"');
+});
+
+test('With Jean apparel chart is read when sizes run across columns and units share cells', async () => {
+  const result = await scan(`<main><h1>Agnes Jeans | White</h1>
+    <fieldset><legend>Size</legend><button>XXS</button><button>XS</button><button>S</button></fieldset>
+    <div class="size-tooltip" hidden>
+      <h3>Swimwear</h3><table><tr><th>Measurement</th><th>XXS</th><th>XS</th><th>S</th></tr>
+        <tr><th>Waist</th><td>50 - 54 cm</td><td>55 - 59 cm</td><td>60 - 64 cm</td></tr></table>
+      <h3>Apparel size guide</h3><table><tr><th>Measurement</th><th>XXS</th><th>XS</th><th>S</th></tr>
+        <tr><th>Bust</th><td><span>75 - 79 cm</span><span>30 - 31 in</span></td><td>80 - 84 cm</td><td>85 - 89 cm</td></tr>
+        <tr><th>Waist</th><td><div><span data-unit="cm">59 <span class="div">-</span> 63</span><span data-unit="in">23 - 25</span></div></td><td><span data-unit="cm">64 - 68</span><span data-unit="in">25 - 27</span></td><td>69 - 73 cm</td></tr>
+        <tr><th>Hip</th><td><span data-unit="cm">85 - 89</span><span data-unit="in">33 - 35</span></td><td><span data-unit="cm">90 - 94</span><span data-unit="in">35 - 37</span></td><td>95 - 99 cm</td></tr>
+      </table>
+    </div></main>`, 'https://withjean.com/collections/jeans/products/agnes-jeans-white');
+  assert.deepEqual(result.sizes.waist, ['XXS', 'XS', 'S']);
+  assert.equal(result.page.store, 'With Jéan');
+  const apparel = result.sizeGuides.find(guide => /apparel/i.test(guide.title));
+  assert.ok(apparel);
+  assert.deepEqual(apparel.headers, ['Size', 'Waist (cm)', 'Hip (cm)']);
+  assert.deepEqual(apparel.rows[0], ['XXS', '59 - 63 cm', '85 - 89 cm']);
 });
 
 test('Motel W/L purchase options stay separate from XS chart labels and unavailable sizes', async () => {

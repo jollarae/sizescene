@@ -77,7 +77,15 @@ async function chooseFit(value) {
 function render(scan) {
   results.replaceChildren();
   if (!scan?.hasSizingInformation) {
-    showMessage('No jeans sizing details were found on this page. Open a product listing and scan again.');
+    if (scan?.aiStatus === 'sign-in-required') {
+      showMessage('Sign in to scan sizing on this store.');
+      const accountLink = add(results, 'a', 'Sign in for assisted scanning →');
+      accountLink.href = 'measurements.html#account-heading';
+      return;
+    }
+    showMessage(scan?.aiStatus === 'unavailable' ?
+      'This page did not expose readable sizing, and the assisted scan is temporarily unavailable. Open the retailer’s size guide and rescan.' :
+      'No jeans sizing details were found on this page. Open a product listing and scan again.');
     return;
   }
   const product = add(results, 'div', undefined, 'product');
@@ -87,7 +95,7 @@ function render(scan) {
     photo.alt = scan.page.title || 'Product photo';
   }
   const productCopy = add(product, 'div', undefined, 'product-copy');
-  add(productCopy, 'div', scan.page.store, 'store');
+  add(productCopy, 'div', scan.page.brand || scan.page.store, 'store');
   add(productCopy, 'h2', scan.page.title || 'Product page');
   const link = add(productCopy, 'a', 'View product ↗');
   link.href = scan.page.url;
@@ -213,6 +221,50 @@ async function scanPage() {
     if (!tab?.id) throw new Error('No active tab found.');
     const [injection] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['scanner.js'] });
     currentScan = injection?.result;
+    if (currentScan && SizeSceneAIConfig.enabled && SizeSceneAI.shouldEnhance(currentScan)) {
+      try {
+        const accessToken = await SizeSceneAuth.getAccessToken();
+        if (!accessToken) currentScan.aiStatus = 'sign-in-required';
+        else {
+          const [snapshotInjection] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['page-snapshot.js'] });
+          let snapshot = snapshotInjection?.result;
+          const hasOptions = snapshot?.items?.some(item => item.kind === 'option');
+          const hasChart = snapshot?.items?.some(item => item.kind === 'chart');
+          if ((!hasOptions || !hasChart) && typeof SizeSceneGuidedScan !== 'undefined') {
+            const explored = await SizeSceneGuidedScan.explore({
+              tabId: tab.id,
+              token: accessToken,
+              page: currentScan.page,
+              endpoint: SizeSceneAIConfig.endpoint,
+              publishableKey: SizeSceneAIConfig.publishableKey
+            });
+            if (explored?.snapshot?.items?.length) snapshot = explored.snapshot;
+          }
+          if (snapshot?.items?.length) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 8000);
+            try {
+              const response = await fetch(SizeSceneAIConfig.endpoint, {
+                method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SizeSceneAIConfig.publishableKey,
+                  Authorization: `Bearer ${accessToken}` },
+                body: JSON.stringify(snapshot), signal: controller.signal
+              });
+              if (response.status === 401) {
+                await SizeSceneAuth.signOut();
+                currentScan.aiStatus = 'sign-in-required';
+              } else {
+                if (!response.ok) throw new Error(`AI extraction returned ${response.status}`);
+                const data = await response.json();
+                currentScan = SizeSceneAI.merge(currentScan, snapshot, data.extraction);
+                currentScan.aiStatus = 'used';
+              }
+            } finally { clearTimeout(timeout); }
+          }
+        }
+      } catch (error) {
+        currentScan.aiStatus = 'unavailable';
+      }
+    }
     detailsOpen = false;
     await loading;
     render(currentScan);

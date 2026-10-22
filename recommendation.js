@@ -27,10 +27,10 @@
   }
 
   function chartMapping(scan, widths) {
-    let best = { rows: new Map(), direct: 0, ordered: 0 };
+    let best = { rows: new Map(), direct: 0, ordered: 0, relevance: -Infinity };
     for (const guide of scan.sizeGuides || []) {
       // A garment chart measures the jeans, not the shopper's body.
-      if (/\bgarment\b/i.test(guide.title || '')) continue;
+      if (/\b(?:garment|swim|swimwear|bikini|tee|t-shirt|shirt|shoe)\b/i.test(guide.title || '')) continue;
       const headers = guide.headers || [];
       const waistIndex = headers.findIndex(value => /\bwaist\b/i.test(value));
       if (waistIndex < 0) continue;
@@ -60,11 +60,28 @@
           thighCm: thighIndex >= 0 ? measurementCm(row[thighIndex], headers[thighIndex]) : null
         });
       }
-      if (direct > best.direct || (direct === best.direct && mapped.size > best.rows.size)) {
-        best = { rows: mapped, direct, ordered };
+      const relevance = (/\b(?:apparel|jeans?|denim|pants|trousers|bottoms)\b/i.test(guide.title || '') ? 2 : 0) +
+        (/\bbody\b/i.test(guide.title || '') ? 1 : 0);
+      if (mapped.size && (direct > best.direct || (direct === best.direct &&
+          (relevance > best.relevance || (relevance === best.relevance && mapped.size > best.rows.size))))) {
+        best = { rows: mapped, direct, ordered, relevance };
       }
     }
     return best;
+  }
+
+  function guideRelevance(guide, options) {
+    const title = String(guide.title || '');
+    if (/\b(?:garment|swim|swimwear|bikini|tee|t-shirt|shirt|shoe)\b/i.test(title)) return -Infinity;
+    const headers = guide.headers || [];
+    const sizeIndex = headers.findIndex(value => /\bsize\b/i.test(value));
+    const waistIndex = headers.findIndex(value => /\bwaist\b/i.test(value));
+    if (sizeIndex < 0 || waistIndex < 0) return -Infinity;
+    const matching = (guide.rows || []).filter(row => options.includes(row[sizeIndex]) &&
+      measurementCm(row[waistIndex], headers[waistIndex]) !== null).length;
+    if (!matching) return -Infinity;
+    return matching * 10 + (/\b(?:apparel|jeans?|denim|pants|trousers|bottoms)\b/i.test(title) ? 8 : 0) +
+      (/\bbody\b/i.test(title) ? 4 : 0) + (headers.some(value => /\bhip\b/i.test(value)) ? 1 : 0);
   }
 
   function naturalFit(details = {}) {
@@ -145,7 +162,9 @@
 
     let choices = widths.length ? options.filter(value => optionWidth(value) === chosenWidth) : [];
     if (!widths.length) {
-      const chartRows = (scan.sizeGuides || []).flatMap(guide => {
+      const selectedGuide = (scan.sizeGuides || []).reduce((best, guide) =>
+        guideRelevance(guide, options) > guideRelevance(best || {}, options) ? guide : best, null);
+      const chartRows = (selectedGuide ? [selectedGuide] : []).flatMap(guide => {
         const sizeIndex = (guide.headers || []).findIndex(value => /\bsize\b/i.test(value));
         const waistIndex = (guide.headers || []).findIndex(value => /\bwaist\b/i.test(value));
         const hipIndex = (guide.headers || []).findIndex(value => /\bhip\b/i.test(value));

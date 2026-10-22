@@ -86,3 +86,10 @@ th { background: #edf3ef; }
 .measurement-form input:focus { outline: 2px solid #678e74; }
 .measurement-form .field-note { margin: 0 0 13px; color: #687780; font-size: 11px; }
 .measurement-form button { margin-top: 5px; }
+.account-section { margin-top: 22px; }
+.account-section h2 { font-size: 15px; margin: 0 0 8px; }
+.account-form { display: grid; gap: 7px; margin-top: 12px; }
+.account-form label { font-size: 12px; font-weight: 700; }
+.account-form input { width: 100%; border: 1px solid #bbcbc4; border-radius: 8px; padding: 10px 11px; font: inherit; font-size: 14px; }
+.account-form button, #sign-out { margin-top: 4px; }
+[hidden] { display: none !important; }

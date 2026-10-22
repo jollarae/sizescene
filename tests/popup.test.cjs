@@ -4,6 +4,103 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { chromium } = require('playwright');
 
+test('popup explores hidden product sizes and a sizing frame before recommending', async () => {
+  const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.addInitScript(() => {
+      let stage = 0;
+      window.__restoredPanels = [];
+      window.SizeSceneAIConfig = { enabled: true, endpoint: 'https://example.test/analyze-listing', publishableKey: 'public-key' };
+      window.fetch = async (_url, options) => {
+        const body = JSON.parse(options.body);
+        if (body.task === 'navigate') {
+          const label = body.goal === 'product-options' ? 'Select size' : stage === 1 ? 'Find your size' : 'Size chart';
+          return { ok: true, json: async () => ({ actionId: body.actions.find(action => action.label === label)?.id || '' }) };
+        }
+        return { ok: true, json: async () => ({ extraction: { productOptionIds: ['e1'],
+          charts: [{ evidenceId: 'e2', title: 'Body size chart', headers: ['Size', 'Waist', 'Hip'], rows: [['W24', '62', '86']] }],
+          fitEvidenceIds: [] } }) };
+      };
+      window.chrome.tabs = { query: async () => [{ id: 27 }] };
+      window.chrome.storage = { local: { get: async key => key === 'sizeSceneSession' ? { sizeSceneSession: {
+        access_token: 'test-access', refresh_token: 'test-refresh', expires_at: 9999999999
+      } } : { measurements: { waistCm: 61, hipCm: 87, inseamCm: 72 } }, set: async () => {}, remove: async () => {} } };
+      window.chrome.scripting = { executeScript: async ({ target, files, func, args }) => {
+        if (files?.[0] === 'scanner.js') return [{ result: { page: { store: 'Other', title: 'Booty Bei Jeans', url: 'https://shop.example/jeans' },
+          sizes: { waist: [], length: [], combined: [], other: [], unavailable: { waist: [], length: [], combined: [], other: [] } },
+          sizeGuides: [], sizeGuideStatus: 'none', details: { fit: [], rise: [], inseam: [], model: [], materials: [], sizingAdvice: [] },
+          hasSizingInformation: false } }];
+        if (files?.[0] === 'page-snapshot.js') return [{ frameId: 0, result: { version: 1, host: 'shop.example', title: 'Jeans', items: stage ?
+          [{ id: 'o1', kind: 'option', label: '24/30', text: 'Select size 24/30', availability: 'available' }] : [] } },
+          ...(target.allFrames && stage >= 3 ? [{ frameId: 8, result: { version: 1, host: 'modules.ecomid.com', items: [
+            { id: 'c1', kind: 'chart', context: 'Body measurements', text: 'SIZE | WAIST | HIP ; W24 | 62 | 86' }
+          ] } }] : [])];
+        if (files?.[0] === 'size-actions.js') return [{ frameId: 0 }, ...(stage >= 2 ? [{ frameId: 8 }] : [])];
+        if (func?.name === 'collectInFrame') return [{ frameId: 0, result: [
+          { id: 'a1', label: 'Select size', context: '', type: 'combobox' },
+          { id: 'a2', label: 'Find your size', context: '', type: 'button' }
+        ] }, ...(stage >= 2 ? [{ frameId: 8, result: [{ id: 'a1', label: 'Size chart', context: '', type: 'button' }] }] : [])];
+        if (func?.name === 'panelStateInFrame') return [{ frameId: 0, result: null }];
+        if (func?.name === 'activateInFrame') { stage++; return [{ frameId: target.frameIds[0], result: true }]; }
+        if (func?.name === 'closePanelInFrame' || func?.name === 'collapseInFrame') {
+          window.__restoredPanels.push([func.name, target.frameIds[0]]);
+          return [{ frameId: target.frameIds[0], result: true }];
+        }
+        throw new Error('Unexpected injection ' + files?.[0]);
+      } };
+    });
+    await page.goto(pathToFileURL(path.join(__dirname, '..', 'popup.html')).href);
+    await page.locator('.recommended-size').getByText('W24 L30').waitFor();
+    assert.equal(await page.getByText('AI scan used').count(), 0);
+    assert.deepEqual(await page.evaluate(() => window.__restoredPanels), [['closePanelInFrame', 8], ['collapseInFrame', 0]]);
+  } finally { await browser.close(); }
+});
+
+test('AI fallback enriches an unfamiliar retailer without sending body measurements', async () => {
+  const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.addInitScript(() => {
+      window.SizeSceneAIConfig = { enabled: true, endpoint: 'https://example.test/analyze-listing', publishableKey: 'public-key' };
+      window.__sentSnapshot = null;
+      window.fetch = async (_url, options) => {
+        window.__sentSnapshot = JSON.parse(options.body);
+        return { ok: true, json: async () => ({ extraction: {
+          productOptionIds: ['o1', 'o2'],
+          charts: [{ evidenceId: 'c1', title: 'Body size chart', headers: ['Size', 'Waist (cm)', 'Hip (cm)'], rows: [['24', '61cm', '87cm'], ['26', '66cm', '92cm']] }],
+          fitEvidenceIds: []
+        } }) };
+      };
+      window.chrome.tabs = { query: async () => [{ id: 27 }] };
+      window.chrome.storage = { local: {
+        get: async key => key === 'sizeSceneSession' ? { sizeSceneSession: {
+          access_token: 'test-access', refresh_token: 'test-refresh', expires_at: 9999999999
+        } } : { measurements: { waistCm: 61, hipCm: 87, inseamCm: 72 } },
+        set: async () => {}, remove: async () => {}
+      } };
+      window.chrome.scripting = { executeScript: async ({ files }) => [{ result: files[0] === 'scanner.js' ? {
+        page: { store: 'Other', title: 'Cigarette Jeans', url: 'https://shop.example/jeans' },
+        sizes: { waist: [], length: [], combined: [], other: [], unavailable: { waist: [], length: [], combined: [], other: [] } },
+        sizeGuides: [], sizeGuideStatus: 'none',
+        details: { fit: [], rise: [], inseam: [], model: [], materials: [], sizingAdvice: [] },
+        hasSizingInformation: false
+      } : { version: 1, host: 'shop.example', title: 'Cigarette Jeans', items: [
+        { id: 'o1', kind: 'option', text: 'Size 24', label: '24', availability: 'available' },
+        { id: 'o2', kind: 'option', text: 'Size 26 Sold out', label: '26', availability: 'unavailable' },
+        { id: 'c1', kind: 'chart', text: 'Body size chart Size Waist Hip 24 61cm 87cm 26 66cm 92cm' }
+      ] } }] };
+    });
+    await page.goto(pathToFileURL(path.join(__dirname, '..', 'popup.html')).href);
+    await page.locator('.recommended-size').getByText('24').waitFor();
+    assert.equal(await page.locator('.recommended-size').innerText(), '24');
+    assert.equal(await page.getByText('AI scan used').count(), 0);
+    assert.equal(await page.evaluate(() => 'measurements' in window.__sentSnapshot), false);
+    await page.getByText('Why this size?').click();
+    assert.equal(await page.locator('[data-section="size-guide"] td').getByText('87cm').count(), 1);
+  } finally { await browser.close(); }
+});
+
 test('popup scans the active tab and displays collected sizing evidence', async () => {
   const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
   try {
@@ -11,7 +108,7 @@ test('popup scans the active tab and displays collected sizing evidence', async 
     await page.addInitScript(() => {
       window.chrome.tabs = { query: async () => [{ id: 17 }] };
       window.chrome.scripting = { executeScript: async () => [{ result: {
-        page: { store: "Levi's", title: "Low Loose Women's Jeans", url: 'https://www.levi.com/example', image: 'https://example.com/jeans.jpg' },
+        page: { store: "Levi's", brand: 'Cheap Monday', title: "Low Loose Women's Jeans", url: 'https://www.levi.com/example', image: 'https://example.com/jeans.jpg' },
         sizes: { waist: ['23', '24'], length: ['30', '32'], combined: [], other: [] },
         sizeGuides: [{ title: 'Size Guide', headers: ['Size', 'Waist'], rows: [['24', '25.25']] }],
         details: { sizingAdvice: ['Runs a bit small'], fit: ['Relaxed through the hip'], rise: [], inseam: [], model: [], materials: [] },
@@ -20,6 +117,7 @@ test('popup scans the active tab and displays collected sizing evidence', async 
     });
     await page.goto(pathToFileURL(path.join(__dirname, '..', 'popup.html')).href);
     await page.getByText('Low Loose Women\'s Jeans').waitFor();
+    assert.equal(await page.locator('.product .store').innerText(), 'CHEAP MONDAY');
     assert.equal(await page.locator('.product-photo').isVisible(), true);
     assert.ok(await page.locator('.product-photo').evaluate(image => image.getBoundingClientRect().width) <= 100);
     assert.equal(await page.getByText('Why this size?').count(), 1);
@@ -29,6 +127,7 @@ test('popup scans the active tab and displays collected sizing evidence', async 
     assert.equal(await page.locator('table tbody tr').innerText(), '24\t25.25');
     assert.equal(await page.getByText('Runs a bit small').count(), 1);
     assert.equal(await page.getByText('No jeans sizing details were found').count(), 0);
+    assert.equal(await page.getByText('AI scan used').count(), 0);
   } finally {
     await browser.close();
   }
@@ -120,10 +219,36 @@ test('measurements page loads the local profile and saves edits', async () => {
     await page.getByLabel('Thigh (cm)').fill('53');
     await page.getByRole('button', { name: 'Save measurements' }).click();
     assert.deepEqual(await page.evaluate(() => window.__saved), { measurements: { waistCm: 63, hipCm: 87, inseamCm: 72, heightCm: 160, thighCm: 53 } });
-    assert.match(await page.locator('[role="status"]').innerText(), /saved/i);
+    assert.match(await page.locator('#save-status').innerText(), /saved/i);
   } finally {
     await browser.close();
   }
+});
+
+test('measurements page signs in with an email link without changing saved body measurements', async () => {
+  const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.addInitScript(() => {
+      const saved = { measurements: { waistCm: 61, hipCm: 87, inseamCm: 72 } };
+      window.__saved = saved;
+      window.chrome.storage = { local: {
+        get: async key => typeof key === 'string' ? { [key]: saved[key] } : saved,
+        set: async value => Object.assign(saved, value),
+        remove: async key => { delete saved[key]; }
+      } };
+      window.fetch = async url => ({ ok: true, json: async () =>
+        String(url).endsWith('/verify') ? { access_token: 'access', refresh_token: 'refresh', expires_in: 3600,
+          user: { email: 'jollarae_ngabdi@berkeley.edu' } } : {} });
+    });
+    await page.goto(pathToFileURL(path.join(__dirname, '..', 'measurements.html')).href);
+    await page.getByLabel('Sign-in link or redirect address').fill('https://lskymmiporxposyoybwq.supabase.co/auth/v1/verify?token=hash123&type=email');
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await page.getByText('Signed in as jollarae_ngabdi@berkeley.edu').waitFor();
+    assert.deepEqual(await page.evaluate(() => window.__saved.measurements), { waistCm: 61, hipCm: 87, inseamCm: 72 });
+    await page.getByRole('button', { name: 'Sign out' }).click();
+    assert.equal(await page.evaluate(() => window.__saved.sizeSceneSession), undefined);
+  } finally { await browser.close(); }
 });
 
 test('popup gives one concise estimate qualifier when the chart is image-only', async () => {

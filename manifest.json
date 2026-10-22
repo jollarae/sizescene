@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
   "name": "SizeScene",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "SizeScene scans jeans listings and compares your measurements with product sizes and stock status.",
   "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["https://lskymmiporxposyoybwq.supabase.co/*", "https://modules.ecomid.com/*"],
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",

@@ -99,6 +99,47 @@ test('letter options can be recommended when the chart maps labels to measuremen
   assert.equal(result.size, 'XS');
 });
 
+test('jeans recommendation selects apparel body measurements over unrelated swim chart', () => {
+  const scan = {
+    sizes: { waist: ['XXS', 'XS', 'S'], length: [], combined: [], other: [], unavailable: { waist: [], length: [], combined: [], other: [] } },
+    sizeGuides: [
+      { title: 'Swimwear size guide', headers: ['Size', 'Waist (cm)', 'Hip (cm)'], rows: [['XXS', '50 - 54', '76 - 80'], ['XS', '55 - 59', '81 - 85'], ['S', '60 - 64', '86 - 90']] },
+      { title: 'Apparel size guide', headers: ['Size', 'Waist (cm)', 'Hip (cm)'], rows: [['XXS', '59 - 63', '85 - 89'], ['XS', '64 - 68', '90 - 94'], ['S', '69 - 73', '95 - 99']] }
+    ], details: { fit: [], rise: [], model: [], materials: [], inseam: [], sizingAdvice: [] }
+  };
+  const result = recommend(scan, profile);
+  assert.equal(result.size, 'XXS');
+  assert.equal(result.status, 'recommended');
+  assert.ok(result.reasons.some(reason => /61 cm/i.test(reason)));
+});
+
+test('numeric jeans sizes do not use a swimwear chart that happens to share size labels', () => {
+  const scan = {
+    sizes: { waist: ['24', '25'], length: [], combined: [], other: [], unavailable: { waist: [], length: [], combined: [], other: [] } },
+    sizeGuides: [
+      { title: 'Swimwear size guide', headers: ['Size', 'Waist (cm)'], rows: [['24', '75'], ['25', '80']] },
+      { title: 'Apparel body size guide', headers: ['Size', 'Waist (cm)'], rows: [['24', '61'], ['25', '66']] }
+    ], details: { fit: [], rise: [], model: [], materials: [], inseam: [], sizingAdvice: [] }
+  };
+  const result = recommend(scan, profile);
+  assert.equal(result.size, '24');
+  assert.equal(result.status, 'recommended');
+  assert.ok(result.reasons.some(reason => /chart associates 24 with about 61 cm/i.test(reason)));
+});
+
+test('numeric jeans sizes prefer a labeled apparel body chart over a generic conversion chart', () => {
+  const scan = {
+    sizes: { waist: ['24', '25'], length: [], combined: [], other: [], unavailable: { waist: [], length: [], combined: [], other: [] } },
+    sizeGuides: [
+      { title: 'Size chart', headers: ['Size', 'Waist (cm)'], rows: [['24', '68'], ['25', '73']] },
+      { title: 'Apparel body size chart', headers: ['Size', 'Waist (cm)'], rows: [['24', '61'], ['25', '66']] }
+    ], details: { fit: [], rise: [], model: [], materials: [], inseam: [], sizingAdvice: [] }
+  };
+  const result = recommend(scan, profile);
+  assert.equal(result.size, '24');
+  assert.ok(result.reasons.some(reason => /chart associates 24 with about 61 cm/i.test(reason)));
+});
+
 test('Levi chart fit advice moves the default one available waist size up', () => {
   const scan = {
     sizes: { waist: ['23', '24', '25', '26'], length: ['30', '32'], combined: [], other: [], unavailable: { waist: [], length: [], combined: [], other: [] } },
