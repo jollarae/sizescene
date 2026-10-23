@@ -262,6 +262,20 @@
   }
   if (sizeGuides.length) sizeGuideStatus = 'table';
   else if (document.querySelector('.kiwi-sizing-modal .ks-image img,.kiwi-sizing-modal img.ks-image')) sizeGuideStatus = 'image-only';
+  let sizeGuideImage = null;
+  if (!sizeGuides.length) {
+    const chartImage = document.querySelector('.kiwi-sizing-modal .ks-image img,.kiwi-sizing-modal img.ks-image,' +
+      '[role="dialog"][aria-label*="size" i] img,dialog[aria-label*="size" i] img');
+    if (chartImage) {
+      try {
+        const chartUrl = new URL(chartImage.currentSrc || chartImage.src, location.href);
+        if (chartUrl.protocol === 'https:' && !chartUrl.username && !chartUrl.password) {
+          sizeGuideImage = chartUrl.href;
+          sizeGuideStatus = 'image-only';
+        }
+      } catch { /* The chart may not have a usable image URL. */ }
+    }
+  }
   if (openedGuide?.isConnected) openedGuide.querySelector('button.modal__close,button.ks-modal-close')?.click();
 
   const details = { fit: [], rise: [], inseam: [], model: [], materials: [], sizingAdvice: [] };
@@ -320,6 +334,6 @@
   const hasSizingInformation = ['waist', 'length', 'combined', 'other'].some(key =>
     sizes[key].length || sizes.unavailable[key].length) ||
     sizeGuides.length > 0 || Object.values(details).some(values => values.length);
-  return { page: { title, url: location.href, store, brand, image }, sizes, sizeGuides, sizeGuideStatus, details,
+  return { page: { title, url: location.href, store, brand, image }, sizes, sizeGuides, sizeGuideStatus, sizeGuideImage, details,
     availability, hasSizingInformation, scannedAt: new Date().toISOString() };
 })()

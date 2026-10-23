@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const AI = require('../ai-scan.js');
+const { recommend } = require('../recommendation.js');
 
 const scan = () => ({
   page: { title: 'Cigarette Jeans', store: 'Other', url: 'https://shop.example/jeans' },
@@ -83,4 +84,38 @@ test('AI does not add a related product XS option to Motel W/L purchase sizes', 
   const result = AI.merge(local, snapshot, { productOptionIds: ['main', 'related'], charts: [], fitEvidenceIds: [] });
   assert.deepEqual(result.sizes.combined, ['W24 L30', 'W24 L32']);
   assert.deepEqual(result.sizes.waist, []);
+});
+
+test('AI-read AGOLDE body chart compares numeric product sizes with waist and hip', () => {
+  const local = scan();
+  local.page.store = 'AGOLDE';
+  local.sizes.waist = ['32', '33'];
+  local.sizes.unavailable.waist = ['23', '24', '25'];
+  local.sizeGuideStatus = 'image-only';
+  const result = AI.mergeImageChart(local, {
+    chartType: 'body', unit: 'in', rows: [
+      { size: '23', waist: '23 1/2', hip: '33 1/2' },
+      { size: '24', waist: '24 1/2"', hip: '34½ in' },
+      { size: '25', waist: '25 1/2', hip: '35 1/2' },
+      { size: '32', waist: '32 1/2', hip: '42 1/2' }
+    ]
+  });
+  assert.equal(result.sizeGuides[0].rows[1][0], '24');
+  assert.equal(result.sizeGuides[0].rows[1][1], '24.5 in');
+  const choice = recommend(result, { waistCm: 61, hipCm: 87, inseamCm: 72 });
+  assert.equal(choice.size, '24');
+  assert.equal(choice.soldOut, true);
+  assert.equal(choice.status, 'recommended');
+  assert.match(choice.explanationFacts.find(fact => fact.id === 'waist').text, /about 62 cm.*about 88 cm/);
+  assert.equal(choice.explanationFacts.some(fact => /image chart/i.test(fact.text)), false);
+});
+
+test('unreadable or unrelated image chart cannot create an unsupported recommendation', () => {
+  const local = scan();
+  local.sizes.waist = ['24', '25'];
+  for (const chart of [
+    { chartType: 'garment', unit: 'in', rows: [{ size: '24', waist: '24.5', hip: '34.5' }] },
+    { chartType: 'body', unit: 'in', rows: [{ size: '24', waist: '24.5', hip: '34.5' }] },
+    { chartType: 'body', unit: 'in', rows: [{ size: '99', waist: '24.5', hip: '34.5' }, { size: '25', waist: '25.5', hip: '35.5' }] }
+  ]) assert.deepEqual(AI.mergeImageChart(local, chart).sizeGuides, []);
 });

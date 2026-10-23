@@ -42,6 +42,34 @@ test('guided scan opens the direct Size Guide before a fit quiz and restores the
   assert.equal(finderOpen, false);
 });
 
+test('guided scan continues past a chart that failed matching and opens a nested size chart', async () => {
+  let stage = 0;
+  const restored = [];
+  const unrelated = { kind: 'chart', context: 'Generic sizing', text: 'SIZE | WAIST ; XS | 24 ; S | 26' };
+  const actual = { kind: 'chart', context: 'Jeans body chart', text: 'SIZE | WAIST | HIP ; 24 | 24.5 | 34.5 ; 25 | 25.5 | 35.5' };
+  const chromeApi = { scripting: { executeScript: async ({ files, func, args }) => {
+    if (files?.[0] === 'size-actions.js') return [{ frameId: 0 }];
+    if (files?.[0] === 'page-snapshot.js') return [{ frameId: 0, result: { host: 'weekday.com', items: [
+      { kind: 'option', label: '24', text: '24' }, unrelated, ...(stage >= 2 ? [actual] : [])
+    ] } }];
+    if (func?.name === 'collectInFrame') return [{ frameId: 0, result: stage === 0 ?
+      [{ id: 'a1', label: 'Find your size', context: 'product', type: 'button' }] :
+      [{ id: 'a2', label: 'Size chart', context: 'Find your size', type: 'button' }] }];
+    if (func?.name === 'panelStateInFrame') return [{ frameId: 0, result: { stage } }];
+    if (func?.name === 'activateInFrame') { stage++; return [{ frameId: 0, result: true }]; }
+    if (func?.name === 'restorePanelsInFrame') { restored.push(args[0].stage); stage = args[0].stage; return [{ frameId: 0, result: true }]; }
+    throw new Error(`Unexpected script ${func?.name}`);
+  } } };
+  const fetcher = async (_url, options) => ({ ok: true, json: async () => ({ actionId: JSON.parse(options.body).actions[0].id }) });
+  const result = await Guided.explore({ tabId: 7, token: 'token', page: { url: 'https://weekday.com/product/jeans' },
+    endpoint: 'https://project.example/function', publishableKey: 'public', chromeApi, fetcher,
+    ignoredCharts: { texts: [unrelated.text], imageUrls: [] } });
+  assert.deepEqual(result.steps, ['Find your size', 'Size chart']);
+  assert.ok(result.snapshot.items.some(item => item.kind === 'chart' && item.text === actual.text));
+  assert.deepEqual(restored, [1, 0]);
+  assert.equal(stage, 0);
+});
+
 test('guided scan restores a sizing dialog opened by Select size', async () => {
   let dialogOpen = false;
   const chromeApi = { scripting: { executeScript: async ({ files, func, args }) => {

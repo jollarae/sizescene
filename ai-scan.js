@@ -15,6 +15,42 @@
       (!scan.sizeGuides?.length && scan.sizeGuideStatus !== 'image-only');
   }
 
+  function mergeImageChart(scan, extraction) {
+    if (!scan || scan.sizeGuides?.length || extraction?.chartType !== 'body' ||
+        !['in', 'cm'].includes(extraction.unit) || !Array.isArray(extraction.rows) ||
+        extraction.rows.length < 2 || extraction.rows.length > 40) return scan;
+    const options = ['waist', 'combined', 'other'].flatMap(key =>
+      [...(scan.sizes?.[key] || []), ...(scan.sizes?.unavailable?.[key] || [])]);
+    const listed = new Set(options.map(value => String(value).match(/^(?:W\s*)?(\d{2})(?:\s*(?:\/|\-|\s)\s*L\s*\d{2})?$/i)?.[1] || String(value).trim().toUpperCase()));
+    const number = value => {
+      const text = String(value || '').trim().replace(/[″”]/g, '"')
+        .replace(/\s*(?:"|inches|inch|in|cm)\s*$/i, '')
+        .replace('½', ' 1/2').replace('¼', ' 1/4').replace('¾', ' 3/4');
+      const match = text.match(/^(\d{1,3})(?:\.(\d+))?(?:\s+(\d)\/(\d))?$/);
+      return match ? Number(match[1]) + (match[2] ? Number(`0.${match[2]}`) : 0) +
+        (match[3] ? Number(match[3]) / Number(match[4]) : 0) : NaN;
+    };
+    const rows = extraction.rows.map(row => {
+      const label = String(row?.size || '').trim().toUpperCase();
+      return { label, waist: number(row?.waist), hip: number(row?.hip) };
+    }).filter(row => listed.has(row.label) && Number.isFinite(row.waist) && Number.isFinite(row.hip));
+    if (rows.length < 2 || new Set(rows.map(row => row.label)).size !== rows.length) return scan;
+    const factor = extraction.unit === 'in' ? 2.54 : 1;
+    if (rows.some(row => row.waist * factor < 40 || row.waist * factor > 140 ||
+        row.hip * factor < 55 || row.hip * factor > 170 || row.hip - row.waist < 3)) return scan;
+    const numeric = rows.every(row => /^\d{2}$/.test(row.label));
+    if (numeric) {
+      const sorted = [...rows].sort((a, b) => Number(a.label) - Number(b.label));
+      if (sorted.some((row, index) => index > 0 &&
+          (row.waist <= sorted[index - 1].waist || row.hip <= sorted[index - 1].hip))) return scan;
+    }
+    const unit = extraction.unit;
+    const chart = { title: 'Body size chart · AI-read image', headers: ['Size', `Waist (${unit})`, `Hip (${unit})`],
+      rows: rows.map(row => [row.label, `${row.waist} ${unit}`, `${row.hip} ${unit}`]) };
+    return { ...scan, sizeGuides: [chart], sizeGuideStatus: 'image-read', imageChartUsed: true,
+      hasSizingInformation: true };
+  }
+
   function merge(scan, snapshot, extraction) {
     if (!scan || !Array.isArray(snapshot?.items) || !extraction || typeof extraction !== 'object') return scan;
     const evidence = new Map(snapshot.items.map(item => [item.id, item]));
@@ -84,5 +120,5 @@
     };
   }
 
-  return { shouldEnhance, merge };
+  return { shouldEnhance, merge, mergeImageChart };
 });

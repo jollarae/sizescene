@@ -191,6 +191,54 @@ test('sizing actions restore the selected tab in a panel that was already open',
   } finally { await browser.close(); }
 });
 
+test('sizing actions unwind a nested Levi size guide and how-to-measure view', async () => {
+  const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`<main>
+      <button id="open-guide">Size Guide</button>
+      <div class="modal" role="dialog" aria-label="Find Your Size" style="display:none">
+        <h2 id="modal-header">Size Guide</h2>
+        <button class="modal__close" aria-label="Close Modal">×</button>
+        <button id="measure">How To Measure</button>
+        <button class="how-to-measure__back-button" style="display:none">Size Guide</button>
+      </div>
+      <script>
+        const modal = document.querySelector('.modal');
+        const measure = document.querySelector('#measure');
+        const back = document.querySelector('.how-to-measure__back-button');
+        document.querySelector('#open-guide').onclick = () => modal.style.display = 'block';
+        document.querySelector('.modal__close').onclick = () => modal.style.display = 'none';
+        measure.onclick = () => {
+          document.querySelector('#modal-header').textContent = 'How To Measure';
+          measure.style.display = 'none'; back.style.display = 'block';
+        };
+        back.onclick = () => {
+          document.querySelector('#modal-header').textContent = 'Size Guide';
+          measure.style.display = 'block'; back.style.display = 'none';
+        };
+      </script></main>`);
+    await page.addScriptTag({ content: fs.readFileSync(path.join(__dirname, '..', 'size-actions.js'), 'utf8') });
+    const initial = await page.evaluate(() => SizeScenePageActions.panelState());
+    await page.locator('#open-guide').click();
+    const guide = await page.evaluate(() => SizeScenePageActions.panelState());
+    await page.locator('#measure').click();
+    assert.equal(await page.locator('#modal-header').innerText(), 'How To Measure');
+    await page.evaluate(state => SizeScenePageActions.restorePanels(state), guide);
+    assert.equal(await page.locator('#modal-header').innerText(), 'Size Guide');
+    assert.equal(await page.locator('.modal').isVisible(), true);
+    await page.evaluate(state => SizeScenePageActions.restorePanels(state), initial);
+    assert.equal(await page.locator('.modal').isVisible(), false);
+
+    await page.locator('#open-guide').click();
+    const preexistingGuide = await page.evaluate(() => SizeScenePageActions.panelState());
+    await page.locator('#measure').click();
+    await page.evaluate(state => SizeScenePageActions.restorePanels(state), preexistingGuide);
+    assert.equal(await page.locator('#modal-header').innerText(), 'Size Guide');
+    assert.equal(await page.locator('.modal').isVisible(), true);
+  } finally { await browser.close(); }
+});
+
 test('sizing actions can restore a dropdown and a sizing panel', async () => {
   const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
   try {

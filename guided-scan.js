@@ -42,6 +42,7 @@
     const host = new URL(page.url).hostname;
     const items = previous?.items ? [...previous.items] : [];
     const seen = new Set(items.map(item => `${item.kind}:${item.text}:${item.label || ''}:${item.context || ''}`));
+    const chartImages = [...(previous?.chartImages || [])];
     for (const frame of results || []) {
       for (const item of frame.result?.items || []) {
         const fingerprint = `${item.kind}:${item.text}:${item.label || ''}:${item.context || ''}`;
@@ -49,8 +50,12 @@
         seen.add(fingerprint);
         items.push({ ...item, id: `e${items.length + 1}`, frameHost: frame.result.host });
       }
+      for (const image of frame.result?.chartImages || []) {
+        if (chartImages.length < 3 && image?.url && !chartImages.some(entry => entry.url === image.url))
+          chartImages.push(image);
+      }
     }
-    return { version: 1, host, title: page.title || '', items };
+    return { version: 1, host, title: page.title || '', items, chartImages };
   }
 
   async function capture(chromeApi, tabId, previous, page) {
@@ -67,9 +72,11 @@
     }
   }
 
-  function hasGoal(snapshot, goal) {
+  function hasGoal(snapshot, goal, ignoredCharts = {}) {
     return goal === 'product-options' ? snapshot.items.some(item => item.kind === 'option') :
-      snapshot.items.some(item => item.kind === 'chart' && /\b(?:waist|hip|inseam|inner leg)\b/i.test(item.text));
+      snapshot.chartImages?.some(image => !ignoredCharts.imageUrls?.includes(image.url)) ||
+      snapshot.items.some(item => item.kind === 'chart' && !ignoredCharts.texts?.includes(item.text) &&
+        /\b(?:waist|hip|inseam|inner leg)\b/i.test(item.text));
   }
 
   async function availableActions(chromeApi, tabId, visited) {
@@ -105,7 +112,7 @@
     return direct.length ? direct : actions;
   }
 
-  async function explore({ tabId, token, page, endpoint, publishableKey, chromeApi = chrome, fetcher = fetch }) {
+  async function explore({ tabId, token, page, endpoint, publishableKey, ignoredCharts = {}, chromeApi = chrome, fetcher = fetch }) {
     const first = await capture(chromeApi, tabId, null, page);
     let snapshot = first.snapshot;
     const initialFrames = new Set(first.frames.map(frame => frame.frameId));
@@ -116,7 +123,7 @@
     let navigationStatus = 'complete';
     try {
       for (const goal of ['product-options', 'size-chart']) {
-        for (let attempt = 0; attempt < 3 && steps.length < 4 && !hasGoal(snapshot, goal); attempt++) {
+        for (let attempt = 0; attempt < 3 && steps.length < 4 && !hasGoal(snapshot, goal, ignoredCharts); attempt++) {
           try {
             const actions = prioritizeActions(await availableActions(chromeApi, tabId, visited), goal);
             if (!actions.length) break;
@@ -137,8 +144,9 @@
             let reading = await capture(chromeApi, tabId, snapshot, page);
             snapshot = reading.snapshot;
             rememberSizingFrames(reading.frames, initialFrames, openedFrames);
-            if (!hasGoal(snapshot, goal)) {
-              await pause(350);
+            for (const delay of [350, 900]) {
+              if (hasGoal(snapshot, goal, ignoredCharts)) break;
+              await pause(delay);
               reading = await capture(chromeApi, tabId, snapshot, page);
               snapshot = reading.snapshot;
               rememberSizingFrames(reading.frames, initialFrames, openedFrames);

@@ -47,6 +47,7 @@ section h3 { margin: 0 0 8px; font-size: 13px; }
 .available-alternative strong { font-size: 17px; }
 .saved-measurements { margin: 0 0 8px; color: #5c725e; font-size: 11px; }
 .estimate-badge { display: inline-block; margin: 0 0 5px; background: #fff5db; color: #775612; border-radius: 5px; padding: 4px 7px; font-size: 11px; }
+.recommendation-disclaimer { margin: 12px 3px 0; color: #71807c; font-size: 10px; line-height: 1.4; text-align: center; }
 .alternative-warning { margin: 0 0 5px; color: #795f2f; font-size: 11px; line-height: 1.35; }
 .fit-choices { display: flex; gap: 6px; margin: 10px 0; }
 .fit-choice { flex: 1; padding: 8px 5px; border: 1px solid #adc4ac; border-radius: 999px; background: #fff; font-size: 11px; }
@@ -59,6 +60,14 @@ section h3 { margin: 0 0 8px; font-size: 13px; }
 .size-details[open] summary::after { transform: rotate(225deg); }
 .size-details summary:focus-visible { outline: 2px solid #678e74; outline-offset: -3px; }
 .size-details-content { padding: 0 14px 14px; }
+.reason-list { display: grid; gap: 8px; margin: 2px 0 9px; }
+.reason-card { padding: 9px 10px; border: 1px solid #e2e9e3; border-radius: 8px; background: #f7faf6; }
+.reason-card strong { display: block; color: #385d52; font-size: 11px; margin-bottom: 3px; }
+.reason-card p { margin: 0; font-size: 11px; line-height: 1.4; }
+.explanation-caution { margin: 8px 0; color: #795f2f; font-size: 11px; line-height: 1.4; }
+.source-details { margin-top: 10px; border-top: 1px solid #e1e8e3; }
+.source-details > summary { padding: 11px 0 4px; font-weight: 650; color: #35676b; }
+.source-details-content { padding-top: 8px; }
 .size-details-content > .note { margin: 6px 0; }
 .size-details section:first-of-type { margin-top: 12px; }
 .recommendation-explanation p { font-size: 11px; line-height: 1.4; margin: 5px 0; }

@@ -24,6 +24,11 @@ test('recommends an available W/L size from body measurements and chart evidence
   assert.match(result.naturalFit, /wide leg/i);
   assert.ok(result.reasons.some(value => /24/.test(value)));
   assert.ok(result.notes.some(value => /inseam|length/i.test(value)));
+  assert.equal(result.explanationFacts.find(fact => fact.id === 'length').kind, 'label');
+  assert.match(result.explanationFacts.find(fact => fact.id === 'length').text, /L30.*label/i);
+  assert.doesNotMatch(result.explanationFacts.find(fact => fact.id === 'length').text, /garment.*(76|30)/i);
+  assert.match(result.explanationFacts.find(fact => fact.id === 'fit').text, /wide leg/i);
+  assert.doesNotMatch(result.explanationFacts.find(fact => fact.id === 'waist').text, /L30/);
 });
 
 test('roomier preference shows the best fit even when its length is sold out', () => {
@@ -45,6 +50,7 @@ test('AGOLDE sold-out best fit remains recommended with the closest available al
   assert.equal(result.soldOut, true);
   assert.equal(result.availableSize, '32');
   assert.ok(result.notes.some(value => /estimate|chart/i.test(value)));
+  assert.match(result.explanationFacts.find(fact => fact.id === 'availability').text, /24.*sold out.*32/i);
 });
 
 test('closer preference explains when no smaller waist is offered', () => {
@@ -61,6 +67,13 @@ test('without a chart, numeric W/L labels give a tentative recommendation', () =
   assert.equal(result.size, 'W24 L30');
   assert.ok(result.notes.some(value => /estimate.*listed sizes/i.test(value)));
   assert.ok(result.notes.every(value => !/not used|cannot be checked|does not provide/i.test(value)));
+});
+
+test('generic directions to check a fit tab are not presented as a designed fit', () => {
+  const scan = motelScan();
+  scan.details.fit = ['Please check the sizing information and fit tab for details on each item.'];
+  const result = recommend(scan, profile);
+  assert.equal(result.explanationFacts.some(fact => fact.id === 'fit'), false);
 });
 
 test('letter-only options without a matching chart do not produce a guessed size', () => {
@@ -85,7 +98,9 @@ test('numeric waist options use the matching chart row and consider hip measurem
   assert.equal(result.status, 'recommended');
   assert.equal(result.size, 'W24 L30');
   assert.ok(result.reasons.some(value => /hip/i.test(value)));
+  assert.match(result.explanationFacts.find(fact => fact.id === 'waist').text, /hip/i);
   assert.ok(result.notes.some(value => /combination|stock/i.test(value)));
+  assert.match(result.explanationFacts.find(fact => fact.id === 'uncertainty').text, /exact.*combination.*stock/i);
 });
 
 test('letter options can be recommended when the chart maps labels to measurements', () => {

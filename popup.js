@@ -5,6 +5,7 @@ let currentScan = null;
 let measurements = defaultMeasurements;
 let fitPreference = 'as-designed';
 let detailsOpen = false;
+let renderRevision = 0;
 
 function add(parent, tag, text, className) {
   const element = document.createElement(tag);
@@ -63,18 +64,89 @@ async function showLoading(mode, preference = fitPreference) {
 
 async function chooseFit(value) {
   if (value === fitPreference) return;
+  const revision = ++renderRevision;
   fitPreference = value;
-  chrome.storage?.local?.set({ fitPreference });
   scanButton.disabled = true;
   try {
+    const explanation = requestExplanation(currentScan, value, measurements);
     await showLoading('fit', value);
-    render(currentScan);
+    const response = await explanation;
+    if (revision === renderRevision) render(currentScan, response);
   } finally {
     scanButton.disabled = false;
   }
 }
 
-function render(scan) {
+async function requestExplanation(scan, preference, profile) {
+  const recommendation = JeansRecommendation.recommend(scan, profile, preference);
+  if (!SizeSceneAIConfig.enabled || !recommendation.size || !recommendation.explanationFacts?.length) return null;
+  try {
+    const token = await SizeSceneAuth.getAccessToken();
+    if (!token) return null;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000);
+    try {
+      const response = await fetch(SizeSceneAIConfig.endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SizeSceneAIConfig.publishableKey,
+          Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ version: 1, task: 'explain', size: recommendation.size,
+          status: recommendation.status, preference,
+          measurements: Object.fromEntries(['waistCm', 'hipCm', 'inseamCm', 'heightCm', 'thighCm']
+            .filter(key => Number.isFinite(Number(profile[key])) && Number(profile[key]) > 0)
+            .map(key => [key, Number(profile[key])])),
+          facts: recommendation.explanationFacts }),
+        signal: controller.signal
+      });
+      return response.ok ? await response.json() : null;
+    } finally { clearTimeout(timeout); }
+  } catch { return null; }
+}
+
+async function readImageChart(scan, imageUrl, token, replaceUnmatched = false) {
+  if (!imageUrl || (scan.sizeGuides?.length && !replaceUnmatched)) return scan;
+  const productSizes = [...new Set(['waist', 'combined', 'other'].flatMap(key =>
+    [...(scan.sizes?.[key] || []), ...(scan.sizes?.unavailable?.[key] || [])]))].slice(0, 40);
+  if (!productSizes.length) return scan;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch(SizeSceneAIConfig.endpoint, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SizeSceneAIConfig.publishableKey,
+        Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ version: 1, task: 'read-chart-image', imageUrl,
+        title: scan.page.title || '', productSizes }), signal: controller.signal
+    });
+    if (!response.ok) return scan;
+    const data = await response.json();
+    const base = replaceUnmatched ? { ...scan, sizeGuides: [], imageChartUsed: false } : scan;
+    const candidate = SizeSceneAI.mergeImageChart(base, data.chart);
+    return candidate !== base && candidate.imageChartUsed ? candidate : scan;
+  } catch { return scan; }
+  finally { clearTimeout(timeout); }
+}
+
+async function extractSnapshot(scan, snapshot, token) {
+  if (!snapshot?.items?.length) return scan;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(SizeSceneAIConfig.endpoint, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SizeSceneAIConfig.publishableKey,
+        Authorization: `Bearer ${token}` },
+      body: JSON.stringify(snapshot), signal: controller.signal
+    });
+    if (response.status === 401) {
+      await SizeSceneAuth.signOut();
+      return { ...scan, aiStatus: 'sign-in-required' };
+    }
+    if (!response.ok) throw new Error(`AI extraction returned ${response.status}`);
+    const data = await response.json();
+    return { ...SizeSceneAI.merge(scan, snapshot, data.extraction), aiStatus: 'used' };
+  } finally { clearTimeout(timeout); }
+}
+
+function render(scan, aiExplanation = null) {
   results.replaceChildren();
   if (!scan?.hasSizingInformation) {
     if (scan?.aiStatus === 'sign-in-required') {
@@ -129,31 +201,37 @@ function render(scan) {
     button.setAttribute('aria-pressed', String(value === fitPreference));
     button.addEventListener('click', () => { void chooseFit(value); });
   }
-  if (recommendation.naturalFit !== 'The listing does not describe its intended fit.')
-    add(recommendationSection, 'p', `Designed fit: ${recommendation.naturalFit}`, 'fit-summary');
-
   const disclosure = add(results, 'details', undefined, 'size-details');
   disclosure.open = detailsOpen;
   disclosure.addEventListener('toggle', () => { detailsOpen = disclosure.open; });
   add(disclosure, 'summary', 'Why this size?');
   const detailContent = add(disclosure, 'div', undefined, 'size-details-content');
-  add(detailContent, 'p',
+  const summary = SizeSceneExplanation.summarize(recommendation, aiExplanation);
+  const reasonList = add(detailContent, 'div', undefined, 'reason-list');
+  for (const item of summary.items) {
+    const card = add(reasonList, 'div', undefined, 'reason-card');
+    add(card, 'strong', item.title);
+    add(card, 'p', item.text);
+  }
+  if (!summary.items.length) add(detailContent, 'p', 'The listing does not connect its size choices to enough body measurements for an explanation.', 'note');
+  if (summary.caution) add(detailContent, 'p', summary.caution, 'explanation-caution');
+  const sourceDisclosure = add(detailContent, 'details', undefined, 'source-details');
+  add(sourceDisclosure, 'summary', 'See source details');
+  const sourceContent = add(sourceDisclosure, 'div', undefined, 'source-details-content');
+  add(sourceContent, 'p',
     `Saved measurements: ${measurements.waistCm} cm waist · ${measurements.hipCm} cm hip · ${measurements.inseamCm} cm inseam.`, 'note');
-  if (measurements.heightCm || measurements.thighCm) add(detailContent, 'p',
+  if (measurements.heightCm || measurements.thighCm) add(sourceContent, 'p',
     `Additional saved measurements: ${[measurements.heightCm && `${measurements.heightCm} cm height`, measurements.thighCm && `${measurements.thighCm} cm thigh`].filter(Boolean).join(' · ')}.`, 'note');
-  const explanation = add(detailContent, 'div', undefined, 'recommendation-explanation');
-  for (const reason of recommendation.reasons) add(explanation, 'p', reason);
-  for (const note of recommendation.notes) add(explanation, 'p', note, 'caution');
 
   if (recommendation.naturalFit !== 'The listing does not describe its intended fit.') {
-    const naturalSection = add(detailContent, 'section', undefined, 'natural-fit');
+    const naturalSection = add(sourceContent, 'section', undefined, 'natural-fit');
     naturalSection.dataset.section = 'natural-fit';
     add(naturalSection, 'h3', 'How these jeans are designed to fit');
     add(naturalSection, 'p', recommendation.naturalFit);
     add(naturalSection, 'p', '“As designed” follows this silhouette. Closer and roomier adjust your size choice relative to it.', 'note');
   }
 
-  const sizeSection = add(detailContent, 'section');
+  const sizeSection = add(sourceContent, 'section');
   sizeSection.dataset.section = 'product-options';
   add(sizeSection, 'h3', 'Product size options');
   add(sizeSection, 'p', 'Sizes offered on this listing. These are the choices to use when ordering.', 'note');
@@ -173,7 +251,7 @@ function render(scan) {
     add(sizeSection, 'p', 'Crossed-out sizes appear unavailable.', 'note');
 
   if (scan.sizeGuides.length || scan.sizeGuideStatus === 'image-only') {
-    const chartSection = add(detailContent, 'section');
+    const chartSection = add(sourceContent, 'section');
     chartSection.dataset.section = 'size-guide';
     add(chartSection, 'h3', 'Size guide · reference only');
     if (scan.sizeGuides.length) add(chartSection, 'p', 'Chart rows explain the brand’s sizing. Labels like XS or S are not product options unless they also appear above.', 'note');
@@ -197,7 +275,7 @@ function render(scan) {
   const labels = { sizingAdvice: 'Sizing advice', rise: 'Rise', fit: 'Leg shape and fit', inseam: 'Inseam / length', model: 'Model shown', materials: 'Fabric' };
   const providedDetails = Object.entries(labels).filter(([key]) => scan.details[key]?.length);
   if (providedDetails.length) {
-    const detailSection = add(detailContent, 'section');
+    const detailSection = add(sourceContent, 'section');
     add(detailSection, 'h3', 'Fit and product details');
     for (const [key, label] of providedDetails) {
       const fact = add(detailSection, 'div', undefined, 'fact');
@@ -206,59 +284,74 @@ function render(scan) {
       for (const entry of scan.details[key]) add(list, 'li', entry);
     }
   }
+  add(results, 'p', 'Your size recommendation is based on the sizing details available. Fit may vary by style.', 'recommendation-disclaimer');
 }
 
 async function scanPage() {
+  const revision = ++renderRevision;
+  fitPreference = 'as-designed';
   scanButton.disabled = true;
   const loading = showLoading('scan');
   try {
     if (chrome.storage?.local) {
-      const saved = await chrome.storage.local.get(['measurements', 'fitPreference']);
+      const saved = await chrome.storage.local.get(['measurements']);
       measurements = saved.measurements || defaultMeasurements;
-      fitPreference = saved.fitPreference || 'as-designed';
     }
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error('No active tab found.');
     const [injection] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['scanner.js'] });
     currentScan = injection?.result;
-    if (currentScan && SizeSceneAIConfig.enabled && SizeSceneAI.shouldEnhance(currentScan)) {
+    const needsChart = currentScan && JeansRecommendation.recommend(currentScan, measurements, 'as-designed').status === 'tentative';
+    const needsTextChart = needsChart && !currentScan.sizeGuideImage;
+    if (currentScan && SizeSceneAIConfig.enabled &&
+        (SizeSceneAI.shouldEnhance(currentScan) || currentScan.sizeGuideImage || needsTextChart)) {
       try {
         const accessToken = await SizeSceneAuth.getAccessToken();
         if (!accessToken) currentScan.aiStatus = 'sign-in-required';
         else {
-          const [snapshotInjection] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['page-snapshot.js'] });
-          let snapshot = snapshotInjection?.result;
-          const hasOptions = snapshot?.items?.some(item => item.kind === 'option');
-          const hasChart = snapshot?.items?.some(item => item.kind === 'chart');
-          if ((!hasOptions || !hasChart) && typeof SizeSceneGuidedScan !== 'undefined') {
-            const explored = await SizeSceneGuidedScan.explore({
-              tabId: tab.id,
-              token: accessToken,
-              page: currentScan.page,
-              endpoint: SizeSceneAIConfig.endpoint,
-              publishableKey: SizeSceneAIConfig.publishableKey
-            });
-            if (explored?.snapshot?.items?.length) snapshot = explored.snapshot;
-          }
-          if (snapshot?.items?.length) {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 8000);
-            try {
-              const response = await fetch(SizeSceneAIConfig.endpoint, {
-                method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SizeSceneAIConfig.publishableKey,
-                  Authorization: `Bearer ${accessToken}` },
-                body: JSON.stringify(snapshot), signal: controller.signal
+          let snapshot = null;
+          if (SizeSceneAI.shouldEnhance(currentScan) || needsTextChart) {
+            const [snapshotInjection] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['page-snapshot.js'] });
+            snapshot = snapshotInjection?.result;
+            const hasOptions = snapshot?.items?.some(item => item.kind === 'option');
+            const hasChart = snapshot?.items?.some(item => item.kind === 'chart') || snapshot?.chartImages?.length;
+            if ((!hasOptions || !hasChart) && typeof SizeSceneGuidedScan !== 'undefined') {
+              const explored = await SizeSceneGuidedScan.explore({
+                tabId: tab.id,
+                token: accessToken,
+                page: currentScan.page,
+                endpoint: SizeSceneAIConfig.endpoint,
+                publishableKey: SizeSceneAIConfig.publishableKey
               });
-              if (response.status === 401) {
-                await SizeSceneAuth.signOut();
-                currentScan.aiStatus = 'sign-in-required';
-              } else {
-                if (!response.ok) throw new Error(`AI extraction returned ${response.status}`);
-                const data = await response.json();
-                currentScan = SizeSceneAI.merge(currentScan, snapshot, data.extraction);
-                currentScan.aiStatus = 'used';
-              }
-            } finally { clearTimeout(timeout); }
+              if (explored?.snapshot) snapshot = explored.snapshot;
+            }
+          }
+          currentScan = await extractSnapshot(currentScan, snapshot, accessToken);
+          const imageUrl = currentScan.sizeGuideImage || snapshot?.chartImages?.[0]?.url;
+          if (imageUrl && !currentScan.sizeGuides?.length)
+            currentScan = await readImageChart(currentScan, imageUrl, accessToken);
+
+          // A visible chart is only useful if its rows match the orderable sizes.
+          // Keep exploring nested sizing controls when the first chart did not.
+          if (currentScan.aiStatus !== 'sign-in-required' &&
+              JeansRecommendation.recommend(currentScan, measurements, 'as-designed').status === 'tentative' &&
+              typeof SizeSceneGuidedScan !== 'undefined') {
+            const ignoredCharts = {
+              texts: (snapshot?.items || []).filter(item => item.kind === 'chart').map(item => item.text),
+              imageUrls: [...new Set([currentScan.sizeGuideImage,
+                ...(snapshot?.chartImages || []).map(image => image.url)].filter(Boolean))]
+            };
+            const explored = await SizeSceneGuidedScan.explore({
+              tabId: tab.id, token: accessToken, page: currentScan.page,
+              endpoint: SizeSceneAIConfig.endpoint, publishableKey: SizeSceneAIConfig.publishableKey,
+              ignoredCharts
+            });
+            const expanded = explored?.snapshot;
+            const foundNewChart = expanded?.items?.some(item => item.kind === 'chart' && !ignoredCharts.texts.includes(item.text));
+            const newImage = expanded?.chartImages?.find(image => !ignoredCharts.imageUrls.includes(image.url));
+            if (foundNewChart) currentScan = await extractSnapshot(currentScan, expanded, accessToken);
+            if (newImage?.url || imageUrl)
+              currentScan = await readImageChart(currentScan, newImage?.url || imageUrl, accessToken, true);
           }
         }
       } catch (error) {
@@ -266,8 +359,10 @@ async function scanPage() {
       }
     }
     detailsOpen = false;
+    const explanation = requestExplanation(currentScan, fitPreference, measurements);
     await loading;
-    render(currentScan);
+    const response = await explanation;
+    if (revision === renderRevision) render(currentScan, response);
   } catch (error) {
     await loading;
     showMessage('Could not scan this tab. Open a normal product page and try again. Chrome blocks scanning its own settings and store pages.', true);

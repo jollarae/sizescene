@@ -109,6 +109,7 @@ test('AGOLDE size dropdown and image-only chart are reported without losing prod
     assert.deepEqual(result.sizes.unavailable.waist, ['34']);
     assert.equal(result.sizeGuides.length, 0);
     assert.equal(result.sizeGuideStatus, 'image-only');
+    assert.equal(result.sizeGuideImage, 'https://example.com/chart.jpg');
     assert.ok(result.details.sizingAdvice.some(x => /true to size/i.test(x)));
     assert.ok(result.details.inseam.some(x => /29"/.test(x)));
     assert.ok(result.details.model.some(x => /size 27/i.test(x)));

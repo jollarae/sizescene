@@ -211,16 +211,23 @@
 
     const reasons = [];
     const notes = [];
+    const explanationFacts = [];
     if (combinationUnconfirmed) notes.push('Waist and length are listed separately; confirm this exact combination is in stock on the product page.');
-    if (evidence?.waistCm != null) reasons.push(`Your waist is ${waistCm} cm; the chart associates ${size} with about ${Math.round(evidence.waistCm)} cm.`);
-    else if (chosenWidth != null) reasons.push(`Your waist is ${waistCm} cm; ${size.match(/W?\s*\d{2}/)?.[0] || size} is the closest numeric waist label.`);
+    if (evidence?.waistCm != null) {
+      reasons.push(`Your waist is ${waistCm} cm; the chart associates ${size} with about ${Math.round(evidence.waistCm)} cm.`);
+      const hipComparison = evidence.hipCm != null ? ` Your hip is ${hipCm} cm; the chart lists about ${Math.round(evidence.hipCm)} cm.` : '';
+      const chartSize = chosenWidth != null ? `W${chosenWidth}` : size;
+      explanationFacts.push({ id: 'waist', title: hipComparison ? 'Waist and hip' : 'Waist', kind: 'chart', text: `Your waist is ${waistCm} cm. The retailer’s chart places ${chartSize} at about ${Math.round(evidence.waistCm)} cm.${hipComparison}` });
+    } else if (chosenWidth != null) {
+      reasons.push(`Your waist is ${waistCm} cm; ${size.match(/W?\s*\d{2}/)?.[0] || size} is the closest numeric waist label.`);
+      explanationFacts.push({ id: 'waist', title: 'Waist', kind: 'label', text: `${size.match(/W?\s*\d{2}/)?.[0] || size} is the closest listed waist label to your ${waistCm} cm waist; the listing does not verify that measurement.` });
+    }
     if (evidence?.hipCm != null) reasons.push(`The chart lists about ${Math.round(evidence.hipCm)} cm at the hip; your hip is ${hipCm} cm.`);
     if (evidence?.thighCm != null && Number.isFinite(thighCm)) reasons.push(`The chart lists about ${Math.round(evidence.thighCm)} cm at the thigh; your thigh is ${thighCm} cm.`);
     const selectedLength = optionLength(size);
     if (selectedLength != null) {
-      const difference = selectedLength * 2.54 - Number(profile.inseamCm);
-      if (Math.abs(difference) > 1.5) notes.push(`The listed L${selectedLength} inseam is about ${Math.round(Math.abs(difference))} cm ${difference > 0 ? 'longer' : 'shorter'} than your ${profile.inseamCm} cm inseam.`);
-      else reasons.push(`L${selectedLength} is close to your ${profile.inseamCm} cm inseam.`);
+      notes.push(`L${selectedLength} is a length label, not a verified garment inseam measurement.`);
+      explanationFacts.push({ id: 'length', title: 'Length', kind: 'label', text: `L${selectedLength} is the closest listed length label to your ${profile.inseamCm} cm inseam. The garment’s measured inseam is unconfirmed.` });
       const heightGuide = heightLengthRange(scan, profile.heightCm);
       if (heightGuide) {
         const guidance = `${heightGuide.minimum}–${heightGuide.maximum} in`;
@@ -235,11 +242,18 @@
         const difference = listedInseamCm - Number(profile.inseamCm);
         const inches = Math.round(toInches(listedInseamCm) * 10) / 10;
         notes.push(`This style lists a fixed ${inches} in inseam, about ${Math.round(Math.abs(difference))} cm ${difference >= 0 ? 'longer' : 'shorter'} than your ${profile.inseamCm} cm inseam.`);
+        explanationFacts.push({ id: 'length', title: 'Length', kind: 'listed-measurement', text: `The listing gives a ${inches} in inseam, about ${Math.round(Math.abs(difference))} cm ${difference >= 0 ? 'longer' : 'shorter'} than your ${profile.inseamCm} cm inseam.` });
       }
     }
     const status = evidence && (chart.direct > 0 || !widths.length) ? 'recommended' : 'tentative';
     if (status === 'tentative') notes.unshift('Fit estimate based on the retailer’s listed sizes and fit guidance; actual fit may vary.');
     if (adviceApplied) reasons.push(`The listing says this style ${adviceShift > 0 ? 'runs small' : 'runs large'}, so the starting size was adjusted by one waist size.`);
+    if (adviceApplied) explanationFacts.push({ id: 'fit', title: 'Fit', kind: 'retailer', text: `The retailer says this style runs ${adviceShift > 0 ? 'small' : 'large'}, so the waist choice was adjusted by one listed size.` });
+    else {
+      const fitDescription = String(scan?.details?.fit?.[0] || '').split(/[.!?]/)[0].trim();
+      if (fitDescription.length <= 95 && /\b(?:wide|straight|skinny|slim|loose|relaxed|flare|bootcut|baggy)\b/i.test(fitDescription))
+        explanationFacts.push({ id: 'fit', title: 'Designed fit', kind: 'retailer', text: `The retailer describes these jeans as ${fitDescription.toLowerCase()}.` });
+    }
     if (preferenceLimited) notes.push(`No ${preference === 'closer' ? 'smaller' : 'larger'} product size was found for this fit preference.`);
     else if (preference !== 'as-designed') reasons.push(`Selected for a ${preference === 'closer' ? 'closer' : 'roomier'} fit than the product’s intended silhouette.`);
     if (soldOut) {
@@ -248,8 +262,12 @@
         const widthGap = Math.abs((optionWidth(availableSize) ?? 0) - (optionWidth(size) ?? 0));
         notes.push(`${availableSize} is the closest available size${widthGap >= 2 ? ', but it may fit substantially differently' : ''}.`);
       } else notes.push('No sizes currently appear available on this listing.');
+      explanationFacts.push({ id: 'availability', title: 'Availability', kind: 'stock', text: `${size} appears sold out${availableSize ? `; ${availableSize} is the closest available option, but may fit differently` : '; no available alternative was found'}.` });
     }
-    return { status, size, soldOut, availableSize, naturalFit: base.naturalFit, reasons, notes };
+    if (combinationUnconfirmed) explanationFacts.push({ id: 'uncertainty', title: 'Check stock', kind: 'limitation', text: 'Waist and length are listed separately. Confirm this exact combination is in stock before ordering.' });
+    else if (status === 'tentative') explanationFacts.push({ id: 'uncertainty', title: 'Estimate', kind: 'limitation', text: 'This is an estimate from listed sizes; a matching body size chart was not confirmed.' });
+    else if (preferenceLimited) explanationFacts.push({ id: 'uncertainty', title: 'Fit choice', kind: 'limitation', text: `No ${preference === 'closer' ? 'smaller' : 'larger'} listed size was found for this fit choice.` });
+    return { status, size, soldOut, availableSize, naturalFit: base.naturalFit, reasons, notes, explanationFacts };
   }
 
   return { recommend };

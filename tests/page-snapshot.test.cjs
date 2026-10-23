@@ -91,6 +91,18 @@ test('page snapshot reads an opened jeans guide modal outside main but ignores i
   } finally { await browser.close(); }
 });
 
+test('page snapshot captures a visible retailer chart image but skips hidden copies', async () => {
+  const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`<main><h1>Arc Jean Petite 27"</h1><button>24</button></main>
+      <div class="kiwi-sizing-modal" style="display:none"><img src="https://example.com/old-chart.jpg"></div>
+      <div class="kiwi-sizing-modal" style="display:block"><img src="https://example.com/body-chart.jpg"></div>`);
+    const snapshot = await page.evaluate(fs.readFileSync(path.join(__dirname, '..', 'page-snapshot.js'), 'utf8'));
+    assert.deepEqual(snapshot.chartImages.map(image => image.url), ['https://example.com/body-chart.jpg']);
+  } finally { await browser.close(); }
+});
+
 test('page snapshot excludes letter sizes from Motel recommended-product quick add cards', async () => {
   const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
   try {

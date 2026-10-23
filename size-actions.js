@@ -4,6 +4,7 @@
   const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
   const inertJavascriptHref = /^javascript:\s*void\s*\(\s*0\s*\)\s*;?$/i;
   const sizingAction = /^(?:select (?:a )?size|choose (?:a )?size|find (?:my|your|the right) size|what(?:'s| is) my size|size (?:chart|guide|finder|information|details)|sizing (?:chart|guide|information)|fit guide|measurements?|how to measure)$/i;
+  const closeLabel = /^(?:close(?: (?:modal|dialog|size guide))?|×|✖|x)$/i;
   const panelSnapshots = root.SizeScenePanelSnapshots || (root.SizeScenePanelSnapshots = new Map());
   let candidates = new Map();
 
@@ -35,6 +36,7 @@
     const panels = openSizingPanels();
     panelSnapshots.set(token, {
       panels: new Set(panels),
+      views: panels.map(panel => ({ panel, heading: clean(panel.querySelector('#modal-header,h1,h2,h3')?.textContent) })),
       selectedTabs: panels.flatMap(panel => [...panel.querySelectorAll('[role="tab"][aria-selected="true"]')]
         .map(tab => ({ panel, tab, label: labelOf(tab) })))
     });
@@ -74,10 +76,16 @@
     for (const panel of openSizingPanels().reverse()) {
       if (baseline.has(panel) || panel.matches('.esc-size-guide--popup') || panel.id === 'es-background') continue;
       const close = [...panel.querySelectorAll('button,[role="button"],.modal_close')].find(node => visible(node) &&
-        /^(?:close|×|✖|x)$/i.test(clean(node.getAttribute('aria-label') || node.getAttribute('title') ||
-          node.innerText || node.textContent)));
+        closeLabel.test(labelOf(node)));
       if (close) { close.click(); changed = true; }
       else if (panel.matches('dialog[open]')) { panel.close(); changed = true; }
+    }
+    for (const { panel, heading } of snapshot?.views || []) {
+      if (!panel.isConnected || !visible(panel) || !heading ||
+          clean(panel.querySelector('#modal-header,h1,h2,h3')?.textContent) === heading) continue;
+      const back = [...panel.querySelectorAll('button[class*="back"],[role="button"][class*="back"]')]
+        .find(node => visible(node) && labelOf(node).toLowerCase() === heading.toLowerCase());
+      if (back) { back.click(); changed = true; }
     }
     for (const { panel, tab, label } of snapshot?.selectedTabs || []) {
       if (!panel.isConnected || !visible(panel)) continue;
@@ -150,7 +158,8 @@
   }
 
   function closePanel() {
-    const button = panelButton('Close');
+    const button = [...document.querySelectorAll('button,[role="button"]')].reverse()
+      .find(node => visible(node) && closeLabel.test(labelOf(node)));
     if (!button) return false;
     button.click();
     return true;

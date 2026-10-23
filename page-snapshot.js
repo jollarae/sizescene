@@ -43,6 +43,17 @@
     const centimeters = cell.querySelector('[data-unit="cm"]');
     return centimeters ? `${clean(centimeters.textContent)} cm` : clean(cell.innerText || cell.textContent);
   };
+  const chartImages = [];
+  const imageContainers = '.kiwi-sizing-modal,[role="dialog"][aria-label*="size" i],dialog[aria-label*="size" i],[class*="size-guide"],[class*="size-chart"],[id*="size-guide"],[id*="size-chart"]';
+  for (const image of document.querySelectorAll(imageContainers.split(',').map(selector => `${selector} img`).join(','))) {
+    if (!visiblyOpen(image) || image.closest('template') || chartImages.length >= 3) continue;
+    const context = clean(`${image.alt || ''} ${image.closest(imageContainers)?.textContent || ''}`).slice(0, 240);
+    let url;
+    try { url = new URL(image.currentSrc || image.src, location.href); } catch { continue; }
+    if (url.protocol !== 'https:' || url.username || url.password ||
+        chartImages.some(entry => entry.url === url.href)) continue;
+    chartImages.push({ url: url.href, context });
+  }
 
   const choices = new Set([...root.querySelectorAll('button,option,label,[role="button"],[role="option"],[role="radio"],[data-size],input[type="radio"]'),
     ...document.querySelectorAll('[role="listbox"] [role="option"]')]);
@@ -115,5 +126,5 @@
     if (text.length < 16 || text.length > 300 || !/\b(?:fit|rise|inseam|length|waist|hip|thigh|stretch|size|model|cotton|denim)\b/i.test(text)) continue;
     add('detail', text);
   }
-  return { version: 1, host: location.hostname, title: clean(root.querySelector('h1')?.textContent || document.title).slice(0, 180), items };
+  return { version: 1, host: location.hostname, title: clean(root.querySelector('h1')?.textContent || document.title).slice(0, 180), items, chartImages };
 })()
