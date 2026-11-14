@@ -20,6 +20,23 @@ function showMessage(message, isError = false) {
   add(results, 'p', message, isError ? 'message error' : 'message');
 }
 
+function showEmptyState(kicker, title, copy) {
+  results.replaceChildren();
+  const panel = add(results, 'section', undefined, 'empty-state');
+  add(panel, 'p', kicker, 'empty-kicker');
+  add(panel, 'h1', title, 'empty-title');
+  add(panel, 'p', copy, 'empty-copy');
+  return panel;
+}
+
+function isProductListing(page) {
+  try {
+    const path = new URL(page?.url).pathname.toLowerCase();
+    return /(?:^|\/)\b(?:products?|item|dp|p)\//.test(path) ||
+      (/\b(?:jeans?|denim)\b/i.test(page?.title || '') && !/\/(?:pin|search)\//.test(path));
+  } catch { return false; }
+}
+
 const loadingPause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
 async function showLoading(mode, preference = fitPreference) {
@@ -41,7 +58,9 @@ async function showLoading(mode, preference = fitPreference) {
   panel.setAttribute('aria-atomic', 'true');
   const visual = add(panel, 'div', undefined, 'loading-visual');
   visual.setAttribute('aria-hidden', 'true');
-  add(visual, 'div', undefined, 'loading-jeans');
+  const jeans = add(visual, 'img', undefined, 'loading-jeans');
+  jeans.src = 'assets/illustrations/jeans-watercolor-sage.png';
+  jeans.alt = '';
   add(visual, 'div', undefined, 'loading-scan-line');
   add(panel, 'p', 'FINDING YOUR FIT', 'loading-eyebrow');
   const title = add(panel, 'h2', stages[0][0], 'loading-title');
@@ -149,15 +168,21 @@ async function extractSnapshot(scan, snapshot, token) {
 function render(scan, aiExplanation = null) {
   results.replaceChildren();
   if (!scan?.hasSizingInformation) {
+    if (!isProductListing(scan?.page)) {
+      showEmptyState('START WITH A PRODUCT', 'Find your fit',
+        'Open a pair of jeans on a retailer’s website, then open SizeScene to see your size recommendation.');
+      return;
+    }
     if (scan?.aiStatus === 'sign-in-required') {
-      showMessage('Sign in to scan sizing on this store.');
-      const accountLink = add(results, 'a', 'Sign in for assisted scanning →');
+      const panel = showEmptyState('ASSISTED SCAN', 'A little more to check',
+        'Sign in to let SizeScene look for sizing details on this listing.');
+      const accountLink = add(panel, 'a', 'Sign in for assisted scanning ↗', 'empty-link');
       accountLink.href = 'measurements.html#account-heading';
       return;
     }
-    showMessage(scan?.aiStatus === 'unavailable' ?
-      'This page did not expose readable sizing, and the assisted scan is temporarily unavailable. Open the retailer’s size guide and rescan.' :
-      'No jeans sizing details were found on this page. Open a product listing and scan again.');
+    const panel = showEmptyState('THIS LISTING', 'Sizing details unavailable',
+      'We couldn’t find enough sizing information for this pair. Open the retailer’s size guide, then select Rescan.');
+    if (scan?.aiStatus === 'unavailable') add(panel, 'p', 'Assisted scanning is temporarily unavailable.', 'empty-note');
     return;
   }
   const product = add(results, 'div', undefined, 'product');
@@ -188,10 +213,13 @@ function render(scan, aiExplanation = null) {
       add(alternative, 'strong', recommendation.availableSize);
     }
   }
-  add(recommendationSection, 'p', 'Compared with your saved measurements', 'saved-measurements');
+  add(recommendationSection, 'p', 'Based on your saved measurements.', 'saved-measurements');
   if (recommendation.status === 'tentative') add(recommendationSection, 'p', 'Estimate · based on listed sizes', 'estimate-badge');
   const alternativeWarning = recommendation.notes.find(note => /substantially differently/i.test(note));
   if (alternativeWarning) add(recommendationSection, 'p', 'The available size may fit substantially differently.', 'alternative-warning');
+  const fitHeading = add(recommendationSection, 'div', undefined, 'fit-heading');
+  add(fitHeading, 'span', 'How would you like it to fit?');
+  add(fitHeading, 'span', 'Adjust fit', 'fit-hint');
   const fitChoices = add(recommendationSection, 'div', undefined, 'fit-choices');
   fitChoices.setAttribute('role', 'group');
   fitChoices.setAttribute('aria-label', 'Fit preference');
@@ -204,7 +232,10 @@ function render(scan, aiExplanation = null) {
   const disclosure = add(results, 'details', undefined, 'size-details');
   disclosure.open = detailsOpen;
   disclosure.addEventListener('toggle', () => { detailsOpen = disclosure.open; });
-  add(disclosure, 'summary', 'Why this size?');
+  const disclosureHeading = add(disclosure, 'summary');
+  const disclosureCopy = add(disclosureHeading, 'span', undefined, 'disclosure-copy');
+  add(disclosureCopy, 'strong', 'Why this size?');
+  add(disclosureCopy, 'small', 'See the details we compared');
   const detailContent = add(disclosure, 'div', undefined, 'size-details-content');
   const summary = SizeSceneExplanation.summarize(recommendation, aiExplanation);
   const reasonList = add(detailContent, 'div', undefined, 'reason-list');
@@ -284,7 +315,7 @@ function render(scan, aiExplanation = null) {
       for (const entry of scan.details[key]) add(list, 'li', entry);
     }
   }
-  add(results, 'p', 'Your size recommendation is based on the sizing details available. Fit may vary by style.', 'recommendation-disclaimer');
+  add(results, 'p', 'Recommendation based on available sizing details. Actual fit may vary.', 'recommendation-disclaimer');
 }
 
 async function scanPage() {

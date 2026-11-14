@@ -433,7 +433,7 @@ test('popup reads an AGOLDE chart image and explains the sold-out best fit', asy
     assert.equal(await page.locator('.recommendation h3').innerText(), 'Your recommended size');
     assert.equal(await page.getByText('Estimate · chart read from image').count(), 0);
     assert.match(await page.locator('.recommendation').innerText(), /sold out/i);
-    assert.equal(await page.locator('#results > :last-child').innerText(), 'Your size recommendation is based on the sizing details available. Fit may vary by style.');
+    assert.equal(await page.locator('#results > :last-child').innerText(), 'Recommendation based on available sizing details. Actual fit may vary.');
     assert.deepEqual(await page.evaluate(() => window.__imageRequest.productSizes), ['32', '23', '24', '25']);
     assert.equal(await page.evaluate(() => 'measurements' in window.__imageRequest), false);
     await page.getByText('Why this size?').click();
