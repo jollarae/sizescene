@@ -2,7 +2,6 @@
 // the extension. The paid OpenAI key stays only in Supabase Edge secrets.
 globalThis.SizeSceneAIConfig = globalThis.SizeSceneAIConfig || {
   enabled: true,
-  ownerEmail: 'jollarae_ngabdi@berkeley.edu',
   supabaseUrl: 'https://lskymmiporxposyoybwq.supabase.co',
   publishableKey: 'sb_publishable_W-5Vwz9_26W7nMpQBVTCMQ_ufbM7iog',
   endpoint: 'https://lskymmiporxposyoybwq.supabase.co/functions/v1/analyze-listing'

@@ -31,6 +31,24 @@ test('recommends an available W/L size from body measurements and chart evidence
   assert.doesNotMatch(result.explanationFacts.find(fact => fact.id === 'waist').text, /L30/);
 });
 
+test('without inseam, recommends a waist but leaves an unverified length open', () => {
+  const { inseamCm, ...withoutInseam } = profile;
+  const result = recommend(motelScan(), { ...withoutInseam, heightCm: 158, weightKg: 50 });
+  assert.equal(result.size, 'W24');
+  assert.equal(result.lengthUnresolved, true);
+  assert.ok(result.notes.some(value => /choose.*length/i.test(value)));
+  assert.ok(result.explanationFacts.every(fact => fact.id !== 'length'));
+});
+
+test('without inseam, a retailer height guide may select a listed length', () => {
+  const scan = motelScan();
+  scan.sizeGuides.push({ title: 'Length by height', headers: ['Height (in.)', "5'2” or shorter", "5'3”–5'7”"],
+    rows: [['Full-Length Styles (in.)', '30–30', '32–32']] });
+  const result = recommend(scan, { waistCm: 61, hipCm: 87, heightCm: 158, weightKg: 50 });
+  assert.equal(result.size, 'W24 L30');
+  assert.equal(result.lengthUnresolved, false);
+});
+
 test('roomier preference shows the best fit even when its length is sold out', () => {
   const result = recommend(motelScan(), profile, 'roomier');
   assert.equal(result.size, 'W26 L30');

@@ -7,7 +7,7 @@
   const dependencies = options => ({
     storage: options?.storage || chrome.storage.local,
     config: options?.config || SizeSceneAIConfig,
-    fetcher: options?.fetcher || fetch
+    fetcher: options?.fetcher || ((...args) => globalThis.fetch(...args))
   });
   async function authRequest(path, body, options) {
     const { config, fetcher } = dependencies(options);
@@ -16,7 +16,13 @@
       headers: { apikey: config.publishableKey, 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
-    if (!response.ok) throw new Error('Supabase sign-in request failed');
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      const error = new Error(detail.msg || detail.message || detail.error_description || 'Account request failed');
+      error.status = response.status;
+      error.authRejected = true;
+      throw error;
+    }
     return response.json();
   }
   function storeSession(session, storage) {
@@ -26,15 +32,85 @@
       access_token: session.access_token,
       refresh_token: session.refresh_token,
       expires_at: expiresAt,
-      email: session.user?.email || ''
+      email: session.user?.email || '',
+      user_id: session.user?.id || ''
     } });
+  }
+  function credentials(email, password) {
+    email = String(email || '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Enter a valid email address');
+    if (typeof password !== 'string' || password.length < 8) throw new Error('Use a password with at least 8 characters');
+    return { email, password };
+  }
+  async function signUp(email, password, options) {
+    const signup = credentials(email, password);
+    if (options?.displayName !== undefined) {
+      const displayName = String(options.displayName).trim().replace(/\s+/g, ' ');
+      if (!displayName || displayName.length > 80) throw new Error('Enter a name of 80 characters or fewer');
+      signup.data = { display_name: displayName };
+    }
+    const session = await authRequest('signup', signup, options);
+    if (!session.access_token) throw new Error('Email confirmation is enabled. Turn it off for this test version.');
+    await storeSession(session, dependencies(options).storage);
+    return session.user;
+  }
+  async function signIn(email, password, options) {
+    const session = await authRequest('token?grant_type=password', credentials(email, password), options);
+    await storeSession(session, dependencies(options).storage);
+    return session.user;
+  }
+  async function updatePassword(password, options) {
+    if (typeof password !== 'string' || password.length < 8)
+      throw new Error('Use a password with at least 8 characters');
+    const { config, fetcher } = dependencies(options);
+    const token = await getAccessToken(options);
+    if (!token) throw new Error('Sign in with your email link first');
+    const response = await fetcher(`${config.supabaseUrl}/auth/v1/user`, {
+      method: 'PUT',
+      headers: { apikey: config.publishableKey, Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(detail.msg || detail.message || detail.error_description || 'Could not set your password');
+    }
+    return response.json();
+  }
+  async function getUser(options) {
+    const { config, fetcher } = dependencies(options);
+    const token = await getAccessToken(options);
+    if (!token) throw new Error('Sign in first');
+    const response = await fetcher(`${config.supabaseUrl}/auth/v1/user`, {
+      headers: { apikey: config.publishableKey, Authorization: `Bearer ${token}` }
+    });
+    if (!response.ok) throw new Error('Could not load your profile');
+    return response.json();
+  }
+  async function updateDisplayName(name, options) {
+    name = String(name || '').trim().replace(/\s+/g, ' ');
+    if (!name || name.length > 80) throw new Error('Enter a name of 80 characters or fewer');
+    const { config, fetcher } = dependencies(options);
+    const token = await getAccessToken(options);
+    if (!token) throw new Error('Sign in first');
+    const response = await fetcher(`${config.supabaseUrl}/auth/v1/user`, {
+      method: 'PUT',
+      headers: { apikey: config.publishableKey, Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: { display_name: name } })
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(detail.msg || detail.message || detail.error_description || 'Could not save your name');
+    }
+    return response.json();
   }
   async function sendCode(email, options) {
     email = String(email || '').trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Enter a valid email address');
     const config = dependencies(options).config;
     if (config.ownerEmail && email !== config.ownerEmail.toLowerCase()) throw new Error('Use the approved test email');
-    await authRequest('otp', { email, create_user: true }, options);
+    await authRequest('otp', { email, create_user: false }, options);
   }
   async function verifyCode(email, token, options) {
     email = String(email || '').trim().toLowerCase();
@@ -98,11 +174,15 @@
       const refreshed = await authRequest('token?grant_type=refresh_token', { refresh_token: session.refresh_token }, options);
       await storeSession(refreshed, storage);
       return refreshed.access_token;
-    } catch {
-      await storage.remove(sessionKey);
-      return null;
+    } catch (error) {
+      if (error.authRejected) {
+        await storage.remove(sessionKey);
+        return null;
+      }
+      throw error;
     }
   }
   async function signOut(options) { await dependencies(options).storage.remove(sessionKey); }
-  return { sendCode, verifyCode, verifyLink, getSession, getAccessToken, signOut };
+  return { signUp, signIn, updatePassword, getUser, updateDisplayName, sendCode, verifyCode, verifyLink,
+    getSession, getAccessToken, signOut };
 });

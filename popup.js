@@ -1,8 +1,7 @@
 const scanButton = document.getElementById('scan');
 const results = document.getElementById('results');
-const defaultMeasurements = { waistCm: 61, hipCm: 87, inseamCm: 72 };
 let currentScan = null;
-let measurements = defaultMeasurements;
+let measurements = null;
 let fitPreference = 'as-designed';
 let detailsOpen = false;
 let renderRevision = 0;
@@ -98,7 +97,8 @@ async function chooseFit(value) {
 
 async function requestExplanation(scan, preference, profile) {
   const recommendation = JeansRecommendation.recommend(scan, profile, preference);
-  if (!SizeSceneAIConfig.enabled || !recommendation.size || !recommendation.explanationFacts?.length) return null;
+  if (!SizeSceneAIConfig.enabled || !recommendation.size || !recommendation.explanationFacts?.length ||
+      profile.inseamCm == null || profile.inseamCm === '') return null;
   try {
     const token = await SizeSceneAuth.getAccessToken();
     if (!token) return null;
@@ -177,7 +177,7 @@ function render(scan, aiExplanation = null) {
       const panel = showEmptyState('ASSISTED SCAN', 'A little more to check',
         'Sign in to let SizeScene look for sizing details on this listing.');
       const accountLink = add(panel, 'a', 'Sign in for assisted scanning ↗', 'empty-link');
-      accountLink.href = 'measurements.html#account-heading';
+      accountLink.href = 'measurements.html';
       return;
     }
     const panel = showEmptyState('THIS LISTING', 'Sizing details unavailable',
@@ -203,8 +203,10 @@ function render(scan, aiExplanation = null) {
   const recommendation = JeansRecommendation.recommend(scan, measurements, fitPreference);
   const recommendationSection = add(results, 'section', undefined, 'recommendation');
   recommendationSection.dataset.section = 'recommendation';
-  add(recommendationSection, 'h3', recommendation.status === 'tentative' ? 'Your size estimate' : 'Your recommended size');
+  add(recommendationSection, 'h3', recommendation.lengthUnresolved ? 'Your recommended waist size' :
+    recommendation.status === 'tentative' ? 'Your size estimate' : 'Your recommended size');
   add(recommendationSection, 'div', recommendation.size || 'Not enough sizing data', 'recommended-size');
+  if (recommendation.lengthUnresolved) add(recommendationSection, 'p', 'Choose a length on the product page.', 'saved-measurements');
   if (recommendation.soldOut) {
     add(recommendationSection, 'p', 'Sold out · best fit for your measurements', 'sold-out-notice');
     if (recommendation.availableSize) {
@@ -249,10 +251,13 @@ function render(scan, aiExplanation = null) {
   const sourceDisclosure = add(detailContent, 'details', undefined, 'source-details');
   add(sourceDisclosure, 'summary', 'See source details');
   const sourceContent = add(sourceDisclosure, 'div', undefined, 'source-details-content');
-  add(sourceContent, 'p',
-    `Saved measurements: ${measurements.waistCm} cm waist · ${measurements.hipCm} cm hip · ${measurements.inseamCm} cm inseam.`, 'note');
-  if (measurements.heightCm || measurements.thighCm) add(sourceContent, 'p',
-    `Additional saved measurements: ${[measurements.heightCm && `${measurements.heightCm} cm height`, measurements.thighCm && `${measurements.thighCm} cm thigh`].filter(Boolean).join(' · ')}.`, 'note');
+  add(sourceContent, 'p', `Saved measurements: ${[
+    `${measurements.waistCm} cm waist`, `${measurements.hipCm} cm hip`,
+    `${measurements.heightCm} cm height`,
+    measurements.weightKg && `${Math.round(measurements.weightKg * (measurements.weightUnit === 'lb' ? 2.2046226218 : 1) * 10) / 10} ${measurements.weightUnit || 'kg'} weight`,
+    measurements.inseamCm && `${measurements.inseamCm} cm inseam`,
+    measurements.thighCm && `${measurements.thighCm} cm thigh`
+  ].filter(Boolean).join(' · ')}.`, 'note');
 
   if (recommendation.naturalFit !== 'The listing does not describe its intended fit.') {
     const naturalSection = add(sourceContent, 'section', undefined, 'natural-fit');
@@ -318,16 +323,11 @@ function render(scan, aiExplanation = null) {
   add(results, 'p', 'Recommendation based on available sizing details. Actual fit may vary.', 'recommendation-disclaimer');
 }
 
-async function scanPage() {
+async function scanPage(loading = showLoading('scan')) {
   const revision = ++renderRevision;
   fitPreference = 'as-designed';
   scanButton.disabled = true;
-  const loading = showLoading('scan');
   try {
-    if (chrome.storage?.local) {
-      const saved = await chrome.storage.local.get(['measurements']);
-      measurements = saved.measurements || defaultMeasurements;
-    }
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error('No active tab found.');
     const [injection] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['scanner.js'] });
@@ -402,5 +402,52 @@ async function scanPage() {
   }
 }
 
-scanButton.addEventListener('click', scanPage);
-scanPage();
+async function start() {
+  scanButton.disabled = true;
+  const loading = showLoading('scan');
+  let step = 'sign-in';
+  try {
+    const token = await SizeSceneAuth.getAccessToken();
+    const session = token && await SizeSceneAuth.getSession();
+    if (SizeSceneOnboarding.nextStep(session, null) === 'account') {
+      const panel = showEmptyState('WELCOME TO SIZESCENE', 'Find your fit',
+        'Save your measurements once, then get size recommendations while you shop.');
+      panel.classList.add('welcome-state');
+      const logo = document.createElement('img');
+      logo.className = 'welcome-logo';
+      logo.src = 'icons/icon-128.png';
+      logo.alt = 'SizeScene mannequin logo';
+      panel.prepend(logo);
+      const actions = add(panel, 'div', undefined, 'welcome-actions');
+      const createLink = add(actions, 'a', 'Create account →', 'welcome-primary');
+      createLink.href = 'measurements.html';
+      const loginLink = add(actions, 'a', 'Already have an account? Log in', 'welcome-secondary');
+      loginLink.href = 'measurements.html?mode=login';
+      return;
+    }
+    step = 'measurements';
+    measurements = await SizeSceneProfile.load();
+    if (SizeSceneOnboarding.nextStep(session, measurements) === 'measurements') {
+      const panel = showEmptyState('ONE MORE STEP', 'Add your measurements',
+        'Save your measurements once. We’ll use them for future size recommendations.');
+      const link = add(panel, 'button', 'Add my measurements →', 'welcome-primary measurement-setup-button');
+      link.addEventListener('click', () => SizeSceneOnboarding.openSetupTab());
+      return;
+    }
+    await scanPage(loading);
+  } catch (error) {
+    console.error('SizeScene account setup failed at', step, error);
+    const panel = showEmptyState('YOUR ACCOUNT',
+      step === 'sign-in' ? 'Could not check your sign-in' : 'Could not load your measurements',
+      error?.message || 'Something interrupted account setup. Please try again.');
+    const retry = add(panel, 'button', 'Try again', 'empty-action');
+    retry.addEventListener('click', start);
+    const accountLink = add(panel, 'a', 'Open account →', 'empty-link');
+    accountLink.href = 'measurements.html';
+  } finally {
+    scanButton.disabled = false;
+  }
+}
+
+scanButton.addEventListener('click', start);
+start();

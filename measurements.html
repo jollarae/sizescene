@@ -3,59 +3,157 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Your measurements · SizeScene</title>
+  <title>Your profile · SizeScene</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <header>
     <div class="topline"><span class="wordmark">SizeScene</span><a class="back-link" href="popup.html">← Back</a></div>
-    <h1>Your measurements</h1>
-    <p>Used only to compare you with sizing information on the product page.</p>
+    <h1 id="page-title" hidden>Your SizeScene</h1>
+    <p id="page-intro" hidden>Create an account to save your measurements and find your fit.</p>
   </header>
   <main>
-    <form id="measurements-form" class="measurement-form">
-      <label for="waist">Waist (cm)</label>
-      <input id="waist" name="waistCm" type="number" min="40" max="200" step="0.1" required>
+    <section id="setup-loading" class="setup-loading" aria-live="polite" hidden>
+      <div class="setup-loading-mark" aria-hidden="true"></div>
+      <p class="empty-kicker">SIZESCENE</p>
+      <h2>Preparing your measurement page</h2>
+      <p id="setup-load-status">Just a moment while we get everything ready.</p>
+      <button id="setup-retry" type="button" hidden>Try again</button>
+    </section>
+    <section class="account-section" aria-labelledby="account-heading">
+      <h2 id="account-heading">Find your fit, every time</h2>
+      <p class="note" id="account-intro">Your account keeps your measurements ready for future scans.</p>
+      <div id="account-switch" class="account-switch" role="group" aria-label="Account choice">
+        <button id="show-signup" type="button" class="selected">Create account</button>
+        <button id="show-login" type="button">Log in</button>
+      </div>
+      <form id="signup-form" class="account-form">
+        <label for="signup-name">Name</label>
+        <input id="signup-name" type="text" autocomplete="name" maxlength="80" required>
+        <label for="signup-email">Email</label>
+        <input id="signup-email" type="email" autocomplete="email" required>
+        <label for="signup-password">Password</label>
+        <input id="signup-password" type="password" minlength="8" autocomplete="new-password" required>
+        <button type="submit">Create account</button>
+      </form>
+      <form id="login-form" class="account-form" hidden>
+        <label for="login-email">Email</label>
+        <input id="login-email" type="email" autocomplete="email" required>
+        <label for="login-password">Password</label>
+        <input id="login-password" type="password" autocomplete="current-password" required>
+        <button type="submit">Log in</button>
+        <button id="email-link-button" type="button" class="text-button">No password? Email me a sign-in link</button>
+      </form>
+      <form id="email-link-form" class="account-form" hidden>
+        <label for="email-link-value">Sign-in link or email code</label>
+        <input id="email-link-value" type="text" autocomplete="one-time-code" required>
+        <button type="submit">Finish signing in</button>
+      </form>
+      <p id="account-status" role="status" class="note"></p>
+      <p id="password-note" class="note">If you previously signed in with an email link, use that option under Log in.</p>
+      <div id="signed-in" hidden>
+        <div class="profile-card">
+          <div id="profile-avatar" class="profile-avatar" aria-hidden="true"></div>
+          <div class="profile-identity">
+            <strong id="profile-name"></strong>
+            <span id="signed-in-email"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+    <form id="measurements-form" class="measurement-form" hidden>
+      <h2>Your measurements</h2>
+      <p class="note">Save these once. SizeScene will load them whenever you shop.</p>
+      <section class="measurement-guide" aria-label="Measurement guide">
+        <div class="guide-toolbar">
+          <span>MEASURE YOUR FIT</span>
+          <div class="unit-toggle" role="group" aria-label="Measurement units">
+            <button id="unit-metric" type="button" aria-pressed="true">Metric</button>
+            <button id="unit-imperial" type="button" aria-pressed="false">Imperial</button>
+          </div>
+        </div>
+        <svg class="measurement-illustration" viewBox="0 0 1024 1536" role="img" aria-label="Measurement guide: measure around the waist, widest hips, and one thigh; measure inseam from crotch to ankle." xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <filter id="transparent-guide-background" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+              <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  -2 -2 -2 0 5.4" />
+            </filter>
+          </defs>
+          <rect width="1024" height="1536" fill="#f8f3ea" />
+          <image href="assets/measurements/gray-sage-mannequin-guide-no-height.png" x="0" y="0" width="1024" height="1536" filter="url(#transparent-guide-background)" />
+        </svg>
+      </section>
+      <div class="measurement-fields">
+      <div class="primary-measurements">
+        <div class="primary-measurement-field">
+          <label id="height-label" for="height">Height</label>
+          <div id="height-metric-fields" class="measurement-unit-input">
+            <input id="height" name="heightCm" type="text" inputmode="decimal" min="100" max="230" aria-label="Height in centimeters" required>
+            <span data-length-unit>cm</span>
+          </div>
+          <div id="height-imperial-fields" class="height-imperial-fields" hidden>
+            <div class="measurement-unit-input"><input id="height-feet" type="number" min="3" max="7" step="1" inputmode="numeric" aria-label="Height feet" disabled><span>ft</span></div>
+            <div class="measurement-unit-input"><input id="height-inches" type="text" min="0" max="11.9" inputmode="decimal" aria-label="Height inches" disabled><span>in</span></div>
+          </div>
+        </div>
+        <div class="primary-measurement-field">
+          <label for="weight">Weight</label>
+          <div class="measurement-unit-input">
+            <input id="weight" name="weight" type="text" inputmode="decimal" min="20" max="350" required>
+            <span data-weight-unit>kg</span>
+          </div>
+        </div>
+      </div>
+      <label for="waist">Waist</label>
+      <div class="measurement-unit-input"><input id="waist" name="waistCm" type="text" inputmode="decimal" min="40" max="200" required><span data-length-unit>cm</span></div>
       <p class="field-note">Measure the narrowest part of your natural waist.</p>
-      <label for="hip">Hip (cm)</label>
-      <input id="hip" name="hipCm" type="number" min="50" max="220" step="0.1" required>
+      <label for="hip">Hip</label>
+      <div class="measurement-unit-input"><input id="hip" name="hipCm" type="text" inputmode="decimal" min="50" max="220" required><span data-length-unit>cm</span></div>
       <p class="field-note">Measure the fullest part of your hips.</p>
-      <label for="inseam">Inseam (cm)</label>
-      <input id="inseam" name="inseamCm" type="number" min="40" max="120" step="0.1" required>
-      <p class="field-note">Measure from crotch to ankle.</p>
-      <label for="height">Height (cm) <span class="optional">optional</span></label>
-      <input id="height" name="heightCm" type="number" min="100" max="230" step="0.1">
-      <p class="field-note">Used to check a retailer’s height-based length guide when available.</p>
-      <label for="thigh">Thigh (cm) <span class="optional">optional</span></label>
-      <input id="thigh" name="thighCm" type="number" min="25" max="100" step="0.1">
+      <label for="inseam">Inseam <span class="optional">optional</span></label>
+      <div class="measurement-unit-input"><input id="inseam" name="inseamCm" type="text" inputmode="decimal" min="40" max="120"><span data-length-unit>cm</span></div>
+      <p class="field-note">Measure from crotch to ankle. Helps select a jeans length.</p>
+      <label for="thigh">Thigh <span class="optional">optional</span></label>
+      <div class="measurement-unit-input"><input id="thigh" name="thighCm" type="text" inputmode="decimal" min="25" max="100"><span data-length-unit>cm</span></div>
       <p class="field-note">Measure around the fullest part of one thigh. Used only if the size chart lists thigh measurements.</p>
       <button type="submit">Save measurements</button>
       <p id="save-status" role="status" class="note"></p>
-    </form>
-    <section class="account-section" aria-labelledby="account-heading">
-      <h2 id="account-heading">AI scan access</h2>
-      <p class="note">Sign in once to test AI scanning and personalized explanations. Your saved measurements stay in this browser, but the measurements used for each explanation are sent to our Supabase function and OpenAI. The size choice is calculated in the extension.</p>
-      <form id="email-form" class="account-form">
-        <label for="account-email">Email</label>
-        <input id="account-email" type="email" autocomplete="email" required>
-        <button type="submit">Email me a sign-in link</button>
-      </form>
-      <form id="code-form" class="account-form" hidden>
-        <label for="account-code">Sign-in link or redirect address</label>
-        <input id="account-code" type="url" placeholder="Paste the full address here" required>
-        <p class="note">Copy the email button’s link address here. If you already opened it and saw a localhost error, copy the full address from that tab’s address bar instead.</p>
-        <button type="submit">Sign in</button>
-      </form>
-      <div id="signed-in" hidden>
-        <p id="signed-in-email" class="note"></p>
-        <button id="sign-out" type="button">Sign out</button>
       </div>
-      <p id="account-status" role="status" class="note"></p>
+    </form>
+    <section id="setup-complete" class="setup-complete" hidden>
+      <p class="empty-kicker">YOU'RE ALL SET</p>
+      <h2>Your fit is ready</h2>
+      <p>Your measurements are saved. Open SizeScene on a product listing to get a recommendation.</p>
+      <button id="close-setup" type="button">Back to my shopping →</button>
+    </section>
+    <section id="profile-actions" class="profile-actions" aria-label="Profile actions" hidden>
+      <details class="profile-name-settings">
+        <summary>Edit name</summary>
+        <form id="profile-name-form" class="account-form">
+          <label for="profile-name-input">Name</label>
+          <input id="profile-name-input" type="text" maxlength="80" autocomplete="name" required>
+          <button type="submit">Save name</button>
+          <p id="profile-name-status" role="status" class="note"></p>
+        </form>
+      </details>
+      <details class="password-settings">
+        <summary>Set a password</summary>
+        <form id="password-form" class="account-form">
+          <label for="new-password">New password</label>
+          <input id="new-password" type="password" minlength="8" autocomplete="new-password" required>
+          <label for="confirm-new-password">Confirm new password</label>
+          <input id="confirm-new-password" type="password" minlength="8" autocomplete="new-password" required>
+          <button type="submit">Save password</button>
+          <p id="password-status" role="status" class="note"></p>
+        </form>
+      </details>
+      <button id="sign-out" type="button">Sign out</button>
     </section>
   </main>
-  <script src="measurements.js"></script>
   <script src="ai-config.js"></script>
   <script src="auth.js"></script>
-  <script src="auth-ui.js"></script>
+  <script src="profile.js"></script>
+  <script src="measurement-units.js"></script>
+  <script src="onboarding.js"></script>
+  <script src="measurements.js"></script>
 </body>
 </html>

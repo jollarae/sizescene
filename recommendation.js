@@ -112,8 +112,8 @@
 
   function recommend(scan, profile, preference = 'as-designed') {
     const base = { size: null, status: 'insufficient-data', naturalFit: naturalFit(scan?.details), reasons: [], notes: [] };
-    if (![profile?.waistCm, profile?.hipCm, profile?.inseamCm].every(value => Number.isFinite(Number(value)) && Number(value) > 0)) {
-      return { ...base, status: 'missing-profile', notes: ['Add waist, hip, and inseam measurements to get a recommendation.'] };
+    if (![profile?.waistCm, profile?.hipCm].every(value => value != null && value !== '' && Number.isFinite(Number(value)) && Number(value) > 0)) {
+      return { ...base, status: 'missing-profile', notes: ['Add waist and hip measurements to get a recommendation.'] };
     }
 
     const availableCombined = scan?.sizes?.combined || [];
@@ -185,24 +185,34 @@
       choices = [evidence.label];
     }
 
-    const wantedLength = toInches(Number(profile.inseamCm));
+    const hasInseam = profile.inseamCm != null && profile.inseamCm !== '' &&
+      Number.isFinite(Number(profile.inseamCm)) && Number(profile.inseamCm) > 0;
+    const heightGuide = hasInseam ? null : heightLengthRange(scan, profile.heightCm);
+    const wantedLength = hasInseam ? toInches(Number(profile.inseamCm)) : heightGuide ?
+      (heightGuide.minimum + heightGuide.maximum) / 2 : null;
+    const offeredLengths = unique(choices.map(optionLength).filter(Number.isFinite));
+    const lengthUnresolved = wantedLength == null &&
+      (offeredLengths.length > 1 || (!combined.length && (scan?.sizes?.length || []).length > 1));
     let size = choices.reduce((best, choice) => {
       if (!best) return choice;
+      if (wantedLength == null) return best;
       return Math.abs((optionLength(choice) ?? wantedLength) - wantedLength) <
         Math.abs((optionLength(best) ?? wantedLength) - wantedLength) ? choice : best;
     }, null);
     if (!size) return { ...base, notes: ['No product size matches the selected fit.'] };
-    const soldOut = !availableOptions.includes(size);
+    if (lengthUnresolved && chosenWidth != null) size = `W${chosenWidth}`;
+    const soldOut = lengthUnresolved ? !availableOptions.some(value => optionWidth(value) === chosenWidth) :
+      !availableOptions.includes(size);
     const availableSize = soldOut ? availableOptions.reduce((best, choice) => {
       if (!best) return choice;
       const distance = value => Math.abs((optionWidth(value) ?? 0) - (optionWidth(size) ?? 0)) * 10 +
-        Math.abs((optionLength(value) ?? wantedLength) - (optionLength(size) ?? wantedLength));
+        (wantedLength == null ? 0 : Math.abs((optionLength(value) ?? wantedLength) - (optionLength(size) ?? wantedLength)));
       return distance(choice) < distance(best) ? choice : best;
     }, null) : null;
     let combinationUnconfirmed = false;
     if (!combined.length && widths.length && (scan.sizes.length || []).length) {
       const lengths = (scan.sizes.length || []).map(value => Number(String(value).match(/^(?:L\s*)?(\d{2})$/i)?.[1])).filter(Number.isFinite);
-      if (lengths.length) {
+      if (lengths.length && wantedLength != null) {
         const length = lengths.reduce((best, value) => Math.abs(value - wantedLength) < Math.abs(best - wantedLength) ? value : best, lengths[0]);
         size = `W${chosenWidth} L${length}`;
         combinationUnconfirmed = true;
@@ -212,6 +222,7 @@
     const reasons = [];
     const notes = [];
     const explanationFacts = [];
+    if (lengthUnresolved) notes.push('Choose a length on the product page; no inseam or retailer height guide confirms one.');
     if (combinationUnconfirmed) notes.push('Waist and length are listed separately; confirm this exact combination is in stock on the product page.');
     if (evidence?.waistCm != null) {
       reasons.push(`Your waist is ${waistCm} cm; the chart associates ${size} with about ${Math.round(evidence.waistCm)} cm.`);
@@ -227,18 +238,20 @@
     const selectedLength = optionLength(size);
     if (selectedLength != null) {
       notes.push(`L${selectedLength} is a length label, not a verified garment inseam measurement.`);
-      explanationFacts.push({ id: 'length', title: 'Length', kind: 'label', text: `L${selectedLength} is the closest listed length label to your ${profile.inseamCm} cm inseam. The garment’s measured inseam is unconfirmed.` });
-      const heightGuide = heightLengthRange(scan, profile.heightCm);
-      if (heightGuide) {
-        const guidance = `${heightGuide.minimum}–${heightGuide.maximum} in`;
-        if (selectedLength >= heightGuide.minimum && selectedLength <= heightGuide.maximum)
+      if (hasInseam) explanationFacts.push({ id: 'length', title: 'Length', kind: 'label', text: `L${selectedLength} is the closest listed length label to your ${profile.inseamCm} cm inseam. The garment’s measured inseam is unconfirmed.` });
+      else if (heightGuide) explanationFacts.push({ id: 'length', title: 'Length', kind: 'height-guide', text: `The retailer’s height guide suggests ${heightGuide.minimum}–${heightGuide.maximum} in lengths for your height; L${selectedLength} is a listed length label.` });
+      else notes.push('This is the only listed length for that waist; its fit on your height is unconfirmed.');
+      const guideForHeight = heightLengthRange(scan, profile.heightCm);
+      if (guideForHeight) {
+        const guidance = `${guideForHeight.minimum}–${guideForHeight.maximum} in`;
+        if (selectedLength >= guideForHeight.minimum && selectedLength <= guideForHeight.maximum)
           reasons.push(`Your height falls in the retailer’s ${guidance} length guide; L${selectedLength} is within that range.`);
-        else notes.push(`Your height points to the retailer’s ${guidance} length range; the size shown follows your measured inseam instead.`);
+        else notes.push(`Your height points to the retailer’s ${guidance} length range; ${hasInseam ? 'the size shown follows your measured inseam instead' : 'no listed length matches it'}.`);
       }
     } else {
       const listedInseam = (scan?.details?.inseam || []).find(value => /\binseam\s*:/i.test(value));
       const listedInseamCm = listedInseam ? measurementCm(listedInseam) : null;
-      if (listedInseamCm != null) {
+      if (listedInseamCm != null && hasInseam) {
         const difference = listedInseamCm - Number(profile.inseamCm);
         const inches = Math.round(toInches(listedInseamCm) * 10) / 10;
         notes.push(`This style lists a fixed ${inches} in inseam, about ${Math.round(Math.abs(difference))} cm ${difference >= 0 ? 'longer' : 'shorter'} than your ${profile.inseamCm} cm inseam.`);
@@ -264,10 +277,12 @@
       } else notes.push('No sizes currently appear available on this listing.');
       explanationFacts.push({ id: 'availability', title: 'Availability', kind: 'stock', text: `${size} appears sold out${availableSize ? `; ${availableSize} is the closest available option, but may fit differently` : '; no available alternative was found'}.` });
     }
-    if (combinationUnconfirmed) explanationFacts.push({ id: 'uncertainty', title: 'Check stock', kind: 'limitation', text: 'Waist and length are listed separately. Confirm this exact combination is in stock before ordering.' });
+    if (lengthUnresolved) explanationFacts.push({ id: 'uncertainty', title: 'Choose length', kind: 'limitation', text: 'Your waist size is selected, but a jeans length still needs to be chosen on the product page.' });
+    else if (combinationUnconfirmed) explanationFacts.push({ id: 'uncertainty', title: 'Check stock', kind: 'limitation', text: 'Waist and length are listed separately. Confirm this exact combination is in stock before ordering.' });
     else if (status === 'tentative') explanationFacts.push({ id: 'uncertainty', title: 'Estimate', kind: 'limitation', text: 'This is an estimate from listed sizes; a matching body size chart was not confirmed.' });
     else if (preferenceLimited) explanationFacts.push({ id: 'uncertainty', title: 'Fit choice', kind: 'limitation', text: `No ${preference === 'closer' ? 'smaller' : 'larger'} listed size was found for this fit choice.` });
-    return { status, size, soldOut, availableSize, naturalFit: base.naturalFit, reasons, notes, explanationFacts };
+    return { status, size, soldOut, availableSize: lengthUnresolved && availableSize ? `W${optionWidth(availableSize)}` : availableSize,
+      lengthUnresolved, naturalFit: base.naturalFit, reasons, notes, explanationFacts };
   }
 
   return { recommend };
